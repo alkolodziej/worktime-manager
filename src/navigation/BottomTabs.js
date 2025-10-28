@@ -1,6 +1,5 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import HomeScreen from '../screens/HomeScreen';
 import ScheduleScreen from '../screens/ScheduleScreen';
@@ -9,19 +8,7 @@ import { colors } from '../utils/theme';
 
 const Tab = createBottomTabNavigator();
 
-const navTheme = {
-  ...DefaultTheme,
-  colors: {
-    ...DefaultTheme.colors,
-    background: colors.background,
-    primary: colors.primary,
-    card: '#fff',
-    text: '#111',
-    border: '#E5E5EA',
-  },
-};
-
-function Tabs() {
+export default function AppTabs() {
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -50,13 +37,5 @@ function Tabs() {
       <Tab.Screen name="Schedule" component={ScheduleScreen} options={{ title: 'Grafik' }} />
       <Tab.Screen name="Profile" component={ProfileScreen} options={{ title: 'Profil' }} />
     </Tab.Navigator>
-  );
-}
-
-export default function RootNavigation() {
-  return (
-    <NavigationContainer theme={navTheme}>
-      <Tabs />
-    </NavigationContainer>
   );
 }
