@@ -4,12 +4,14 @@ import Screen from '../components/Screen';
 import Card from '../components/Card';
 import ProgressBar from '../components/ProgressBar';
 import { colors, spacing, radius } from '../utils/theme';
-import { getWeekSummary, generateShifts } from '../utils/mockData';
 import { minutesToHhMm } from '../utils/format';
-import { apiGetShifts } from '../utils/api';
+import { apiGetShifts, apiGetTimesheets } from '../utils/api';
+import { useAuth } from '../context/AuthContext';
 
 export default function EarningsCalculatorScreen() {
+  const { user } = useAuth();
   const [shifts, setShifts] = React.useState([]);
+  const [timesheets, setTimesheets] = React.useState([]);
   const [rate, setRate] = React.useState('20'); // zł/h default
 
   React.useEffect(() => {
@@ -17,13 +19,62 @@ export default function EarningsCalculatorScreen() {
       try {
         const list = await apiGetShifts({});
         setShifts(list);
-      } catch {
-        setShifts(generateShifts({ startDate: new Date(), days: 21 }));
+      } catch (error) {
+        console.error('Failed to fetch shifts:', error);
       }
     })();
   }, []);
 
-  const summary = React.useMemo(() => getWeekSummary(shifts, new Date()), [shifts]);
+  React.useEffect(() => {
+    if (!user?.id) return;
+    (async () => {
+      try {
+        const list = await apiGetTimesheets({ userId: user.id });
+        setTimesheets(list);
+      } catch (error) {
+        console.error('Failed to fetch timesheets:', error);
+      }
+    })();
+  }, [user?.id]);
+
+  const summary = React.useMemo(() => {
+    const today = new Date();
+    const start = new Date(today);
+    start.setHours(0,0,0,0);
+    const end = new Date(start);
+    end.setDate(start.getDate() + 7);
+
+    // Calculate worked minutes from timesheets
+    let workedMinutes = 0;
+    timesheets.forEach(timesheet => {
+      const clockIn = new Date(timesheet.clockIn);
+      const clockOut = timesheet.clockOut ? new Date(timesheet.clockOut) : null;
+      if (clockIn >= start && clockIn < end && clockOut) {
+        workedMinutes += (clockOut - clockIn) / (1000 * 60); // Convert ms to minutes
+      }
+    });
+
+    // Calculate planned minutes from shifts
+    let plannedMinutes = 0;
+    shifts.forEach(shift => {
+      if (!shift?.date) return;
+      const shiftDate = new Date(shift.date);
+      if (shiftDate >= start && shiftDate < end) {
+        const [startHour, startMin] = shift.start.split(':').map(x => parseInt(x, 10));
+        const [endHour, endMin] = shift.end.split(':').map(x => parseInt(x, 10));
+        let minutes = (endHour * 60 + endMin) - (startHour * 60 + startMin);
+        if (minutes < 0) minutes += 24 * 60; // Handle overnight shifts
+        plannedMinutes += minutes;
+      }
+    });
+
+    return {
+      workedMinutes,
+      plannedMinutes,
+      targetMinutes: 40 * 60, // 40 hours per week
+    };
+  }, [shifts, timesheets]);
+
   const workedHours = summary.workedMinutes / 60;
   const hourly = parseFloat(rate) || 0;
   const earnings = (workedHours * hourly);

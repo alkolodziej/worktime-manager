@@ -8,31 +8,79 @@ import ProgressBar from '../components/ProgressBar';
 import Badge from '../components/Badge';
 import { Ionicons } from '@expo/vector-icons';
 import { formatTimeRange, minutesToHhMm } from '../utils/format';
-import { mockUser, generateShifts, getWeekSummary } from '../utils/mockData';
-import { apiGetShifts, apiClockIn, apiClockOut } from '../utils/api';
+import { apiGetShifts, apiClockIn, apiClockOut, apiGetTimesheets } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function HomeScreen() {
   const { user } = useAuth();
-  // dynamic mock schedule
   const today = new Date();
   const todayStr = today.toDateString();
   const [shifts, setShifts] = React.useState([]);
+  const [timesheets, setTimesheets] = React.useState([]);
+
   React.useEffect(() => {
     (async () => {
       try {
         const list = await apiGetShifts({});
         setShifts(list);
-      } catch {
-        // fallback to local generator if backend not available
-        setShifts(generateShifts({ startDate: today, days: 21 }));
+      } catch (error) {
+        console.error('Failed to fetch shifts:', error);
       }
     })();
   }, [todayStr]);
-  const todaysShift = shifts.find(s => s && s.date && s.date.toDateString() === todayStr);
-  const nextShift = todaysShift || shifts.find(s => s && s.date && s.date > today) || shifts[0];
-  const weekSummary = React.useMemo(() => getWeekSummary(shifts, today, mockUser.targetWeekMinutes), [shifts, todayStr]);
+
+  React.useEffect(() => {
+    if (!user?.id) return;
+    (async () => {
+      try {
+        const list = await apiGetTimesheets({ userId: user.id });
+        setTimesheets(list);
+      } catch (error) {
+        console.error('Failed to fetch timesheets:', error);
+      }
+    })();
+  }, [user?.id]);
+  const todaysShift = shifts.find(s => s && s.date && new Date(s.date).toDateString() === todayStr);
+  const nextShift = todaysShift || shifts.find(s => s && s.date && new Date(s.date) > today) || shifts[0];
+
+  // Calculate week summary from timesheets
+  const weekSummary = React.useMemo(() => {
+    const start = new Date(today);
+    start.setHours(0,0,0,0);
+    const end = new Date(start);
+    end.setDate(start.getDate() + 7);
+
+    // Calculate worked minutes from timesheets
+    let workedMinutes = 0;
+    timesheets.forEach(timesheet => {
+      const clockIn = new Date(timesheet.clockIn);
+      const clockOut = timesheet.clockOut ? new Date(timesheet.clockOut) : null;
+      if (clockIn >= start && clockIn < end && clockOut) {
+        workedMinutes += (clockOut - clockIn) / (1000 * 60); // Convert ms to minutes
+      }
+    });
+
+    // Calculate planned minutes from shifts
+    let plannedMinutes = 0;
+    shifts.forEach(shift => {
+      if (!shift?.date) return;
+      const shiftDate = new Date(shift.date);
+      if (shiftDate >= start && shiftDate < end) {
+        const [startHour, startMin] = shift.start.split(':').map(x => parseInt(x, 10));
+        const [endHour, endMin] = shift.end.split(':').map(x => parseInt(x, 10));
+        let minutes = (endHour * 60 + endMin) - (startHour * 60 + startMin);
+        if (minutes < 0) minutes += 24 * 60; // Handle overnight shifts
+        plannedMinutes += minutes;
+      }
+    });
+
+    return {
+      workedMinutes,
+      plannedMinutes,
+      targetMinutes: 40 * 60, // 40 hours per week
+    };
+  }, [shifts, timesheets, todayStr]);
 
   const [activeStart, setActiveStart] = React.useState(null); // Date | null
   const [tick, setTick] = React.useState(0); // force re-render each second when needed
@@ -87,7 +135,7 @@ export default function HomeScreen() {
 
   return (
     <Screen>
-      <Text style={styles.greeting}>Cześć, {mockUser.name.split(' ')[0]} 👋</Text>
+      <Text style={styles.greeting}>Cześć, {user?.name?.split(' ')[0] || 'Użytkowniku'} 👋</Text>
 
       <SectionHeader title={todaysShift ? 'Dzisiejsza zmiana' : 'Najbliższa zmiana'} />
       <Card style={{ marginBottom: spacing.lg }}>

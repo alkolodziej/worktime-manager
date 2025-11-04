@@ -6,8 +6,8 @@ import Card from '../components/Card';
 import Badge from '../components/Badge';
 import SectionHeader from '../components/SectionHeader';
 import { dayNamePl, formatDateLabel, formatTimeRange } from '../utils/format';
-import { generateShifts } from '../utils/mockData';
 import { apiGetShifts } from '../utils/api';
+import { showToast } from '../components/Toast';
 
 export default function ScheduleScreen() {
   const [range, setRange] = React.useState('week'); // 'week' | 'month'
@@ -17,8 +17,9 @@ export default function ScheduleScreen() {
       try {
         const list = await apiGetShifts({});
         setBase(list);
-      } catch {
-        setBase(generateShifts({ startDate: new Date(), days: 28 }));
+      } catch (error) {
+        console.error('Failed to fetch shifts:', error);
+        showToast('Nie udało się załadować grafiku', 'error');
       }
     })();
   }, []);
