@@ -15,7 +15,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 export default function HomeScreen() {
   const { user } = useAuth();
   const today = new Date();
-  const todayStr = today.toDateString();
+  const todayStr = today.toLocaleDateString('pl-PL');
   const [shifts, setShifts] = React.useState([]);
   const [timesheets, setTimesheets] = React.useState([]);
 
@@ -41,7 +41,7 @@ export default function HomeScreen() {
       }
     })();
   }, [user?.id]);
-  const todaysShift = shifts.find(s => s && s.date && new Date(s.date).toDateString() === todayStr);
+  const todaysShift = shifts.find(s => s && s.date && new Date(s.date).toLocaleDateString('pl-PL') === todayStr);
   const nextShift = todaysShift || shifts.find(s => s && s.date && new Date(s.date) > today) || shifts[0];
 
   // Calculate week summary from timesheets

@@ -12,8 +12,16 @@ export default function AvailabilityScreen() {
   const { user } = useAuth();
   const [list, setList] = React.useState([]);
   const [date, setDate] = React.useState(null);
-  const [startDate, setStartDate] = React.useState(null);
-  const [endDate, setEndDate] = React.useState(null);
+  const [startDate, setStartDate] = React.useState(() => {
+    const d = new Date();
+    d.setHours(8, 0, 0, 0);
+    return d;
+  });
+  const [endDate, setEndDate] = React.useState(() => {
+    const d = new Date();
+    d.setHours(16, 0, 0, 0);
+    return d;
+  });
   const [loading, setLoading] = React.useState(false);
 
   const load = React.useCallback(async () => {
@@ -34,14 +42,27 @@ export default function AvailabilityScreen() {
       return;
     }
     try {
-      const start = startDate.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', hour12: false });
-      const end = endDate.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', hour12: false });
+      // Formatowanie godzin w formacie HH:mm
+      const formatTime = (date) => {
+        const hours = String(date.getHours()).padStart(2, '0');
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+        return `${hours}:${minutes}`;
+      };
+
+      const start = formatTime(startDate);
+      const end = formatTime(endDate);
+
+      // Formatowanie daty jako ISO string (tylko data, bez czasu)
+      // Stwórz nową datę na północ UTC dla wybranego dnia
+      const utcDate = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 23, 0, 0));
+
       await apiCreateAvailability({ 
         userId: user.id, 
-        date: date.toISOString(), 
-        start, 
-        end 
+        date: utcDate.toISOString(),
+        start,
+        end
       });
+      
       setDate(null);
       setStartDate(null);
       setEndDate(null);
@@ -94,7 +115,11 @@ export default function AvailabilityScreen() {
             />
           </View>
         </View>
-        <TouchableOpacity style={[styles.button, (!date || !start || !end) && styles.buttonDisabled]} disabled={!date || !start || !end} onPress={onAdd}>
+        <TouchableOpacity 
+          style={[styles.button, (!date || !startDate || !endDate) && styles.buttonDisabled]} 
+          disabled={!date || !startDate || !endDate} 
+          onPress={onAdd}
+        >
           <Text style={styles.buttonText}>Dodaj</Text>
         </TouchableOpacity>
       </Card>
@@ -110,7 +135,7 @@ export default function AvailabilityScreen() {
           <Card>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <View>
-                <Text style={styles.itemTitle}>{new Date(item.date).toDateString()}</Text>
+                <Text style={styles.itemTitle}>{new Date(item.date).toLocaleDateString('pl-PL')}</Text>
                 <Text style={styles.itemMeta}>{item.start}–{item.end}</Text>
               </View>
               <TouchableOpacity onPress={() => onDelete(item.id)}>

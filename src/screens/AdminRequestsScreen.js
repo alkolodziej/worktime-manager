@@ -61,7 +61,7 @@ export default function AdminRequestsScreen() {
         renderItem={({ item }) => (
           <Card>
             <Text style={styles.itemTitle}>Użytkownik {item.userId}</Text>
-            <Text style={styles.itemMeta}>{new Date(item.date).toDateString()} • {item.start}-{item.end}</Text>
+            <Text style={styles.itemMeta}>{new Date(item.date).toLocaleDateString('pl-PL')} • {item.start}-{item.end}</Text>
           </Card>
         )}
       />

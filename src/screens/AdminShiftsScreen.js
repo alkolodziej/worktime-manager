@@ -18,7 +18,16 @@ export default function AdminShiftsScreen() {
 
   const load = React.useCallback(async () => {
     setLoading(true);
-    try { setList(await apiGetShifts({})); } catch {}
+    try { 
+      const shifts = await apiGetShifts({});
+      setList(shifts.map(shift => ({
+        ...shift,
+        date: new Date(shift.date)
+      })));
+    } catch (error) {
+      console.error('Failed to load shifts:', error);
+      showToast('Nie udało się załadować zmian', 'error');
+    }
     setLoading(false);
   }, []);
 
@@ -30,10 +39,16 @@ export default function AdminShiftsScreen() {
       return;
     }
     try {
-      const start = startDate.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', hour12: false });
-      const end = endDate.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', hour12: false });
+      // Upewnij się, że mamy obiekty Date
+      const shiftDate = date instanceof Date ? date : new Date(date);
+      const shiftStart = startDate instanceof Date ? startDate : new Date(startDate);
+      const shiftEnd = endDate instanceof Date ? endDate : new Date(endDate);
+
+      const start = shiftStart.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', hour12: false });
+      const end = shiftEnd.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', hour12: false });
+      
       await apiCreateShift({ 
-        date: date.toISOString(), 
+        date: shiftDate.toISOString(), 
         start, 
         end, 
         role, 
@@ -110,7 +125,7 @@ export default function AdminShiftsScreen() {
             <TextInput value={location} onChangeText={setLocation} placeholder="Restauracja" style={styles.input} placeholderTextColor={colors.muted} />
           </View>
         </View>
-        <TouchableOpacity style={[styles.button, (!date || !start || !end) && styles.buttonDisabled]} disabled={!date || !start || !end} onPress={onCreate}>
+        <TouchableOpacity style={[styles.button, (!date || !startDate || !endDate) && styles.buttonDisabled]} disabled={!date || !startDate || !endDate} onPress={onCreate}>
           <Text style={styles.buttonText}>Dodaj zmianę</Text>
         </TouchableOpacity>
       </Card>
@@ -123,7 +138,7 @@ export default function AdminShiftsScreen() {
         onRefresh={load}
         renderItem={({ item }) => (
           <Card>
-            <Text style={styles.itemTitle}>{item.date.toDateString()} • {item.start}-{item.end}</Text>
+            <Text style={styles.itemTitle}>{new Date(item.date).toLocaleDateString('pl-PL')} • {item.start}-{item.end}</Text>
             <Text style={styles.itemMeta}>{item.location} • {item.role} • przypisany: {item.assignedUserId || '—'}</Text>
             <View style={{ flexDirection: 'row', gap: spacing.md, marginTop: spacing.md }}>
               <TouchableOpacity style={styles.smallBtnDanger} onPress={() => onDelete(item.id)}>

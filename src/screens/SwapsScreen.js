@@ -52,7 +52,7 @@ export default function SwapsScreen() {
           <Card>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <View>
-                <Text style={styles.itemTitle}>{item.date.toDateString()}</Text>
+                <Text style={styles.itemTitle}>{new Date(item.date).toLocaleDateString('pl-PL')}</Text>
                 <Text style={styles.itemMeta}>{formatTimeRange(item.start, item.end)} • {item.location}</Text>
               </View>
               <TouchableOpacity style={styles.smallBtn} onPress={() => requestSwap(item.id)}>

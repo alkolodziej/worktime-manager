@@ -15,21 +15,33 @@ export default function DateTimePicker({
 
   const handleChange = (event, selectedValue) => {
     setShow(Platform.OS === 'ios'); // Only iOS keeps the picker open
-    if (event.type === 'set' && selectedValue) {
+    
+    // Na Androidzie event.type nie istnieje, ale otrzymujemy selectedValue
+    // Na iOS sprawdzamy event.type === 'set'
+    if (Platform.OS === 'android') {
+      if (selectedValue) {
+        onChange(selectedValue);
+      }
+    } else if (event.type === 'set' && selectedValue) {
       onChange(selectedValue);
     }
   };
 
   const formatValue = () => {
-    if (!value) return placeholder;
-    if (mode === 'date') {
-      return value.toLocaleDateString('pl-PL');
-    } else {
-      return value.toLocaleTimeString('pl-PL', { 
-        hour: '2-digit', 
-        minute: '2-digit',
-        hour12: false 
-      });
+    if (!value || !(value instanceof Date)) return placeholder;
+    try {
+      if (mode === 'date') {
+        return value.toLocaleDateString('pl-PL');
+      } else {
+        return value.toLocaleTimeString('pl-PL', { 
+          hour: '2-digit', 
+          minute: '2-digit',
+          hour12: false 
+        });
+      }
+    } catch (error) {
+      console.warn('Error formatting date:', error);
+      return placeholder;
     }
   };
 
@@ -50,11 +62,12 @@ export default function DateTimePicker({
 
       {show && (
         <RNDateTimePicker
-          value={value || new Date()}
+          value={value instanceof Date ? value : new Date()}
           mode={mode}
           onChange={handleChange}
           display={Platform.OS === 'ios' ? 'spinner' : 'default'}
           is24Hour={true}
+          minimumDate={mode === 'date' ? new Date() : undefined}
         />
       )}
     </View>
