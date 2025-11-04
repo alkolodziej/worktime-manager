@@ -2,15 +2,16 @@ import React from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, FlatList } from 'react-native';
 import Screen from '../components/Screen';
 import Card from '../components/Card';
+import DateTimePicker from '../components/DateTimePicker';
 import { colors, spacing, radius } from '../utils/theme';
 import { apiGetShifts, apiCreateShift, apiDeleteShift, apiAssignShift } from '../utils/api';
 
 export default function AdminShiftsScreen() {
   const [list, setList] = React.useState([]);
   const [loading, setLoading] = React.useState(false);
-  const [date, setDate] = React.useState('');
-  const [start, setStart] = React.useState('08:00');
-  const [end, setEnd] = React.useState('16:00');
+  const [date, setDate] = React.useState(null);
+  const [startDate, setStartDate] = React.useState(null);
+  const [endDate, setEndDate] = React.useState(null);
   const [role, setRole] = React.useState('Kelner');
   const [location, setLocation] = React.useState('Restauracja');
 
@@ -23,8 +24,22 @@ export default function AdminShiftsScreen() {
   React.useEffect(() => { load(); }, [load]);
 
   const onCreate = async () => {
-    if (!date || !start || !end) return;
-    try { await apiCreateShift({ date, start, end, role, location }); await load(); setDate(''); } catch {}
+    if (!date || !startDate || !endDate) return;
+    try {
+      const start = startDate.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', hour12: false });
+      const end = endDate.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', hour12: false });
+      await apiCreateShift({ 
+        date: date.toISOString(), 
+        start, 
+        end, 
+        role, 
+        location 
+      }); 
+      await load(); 
+      setDate(null); 
+      setStartDate(null);
+      setEndDate(null);
+    } catch {}
   };
 
   const onDelete = async (id) => { try { await apiDeleteShift(id); await load(); } catch {} };
@@ -35,16 +50,31 @@ export default function AdminShiftsScreen() {
       <Text style={styles.title}>Zarządzaj zmianami</Text>
 
       <Card style={{ marginTop: spacing.md }}>
-        <Text style={styles.label}>Data</Text>
-        <TextInput value={date} onChangeText={setDate} placeholder="2025-10-28" style={styles.input} placeholderTextColor={colors.muted} />
+        <DateTimePicker
+          label="Data"
+          value={date}
+          onChange={setDate}
+          mode="date"
+          placeholder="Wybierz datę"
+        />
         <View style={{ flexDirection: 'row', gap: spacing.md, marginTop: spacing.md }}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.label}>Od</Text>
-            <TextInput value={start} onChangeText={setStart} placeholder="08:00" style={styles.input} placeholderTextColor={colors.muted} />
+            <DateTimePicker
+              label="Od"
+              value={startDate}
+              onChange={setStartDate}
+              mode="time"
+              placeholder="08:00"
+            />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.label}>Do</Text>
-            <TextInput value={end} onChangeText={setEnd} placeholder="16:00" style={styles.input} placeholderTextColor={colors.muted} />
+            <DateTimePicker
+              label="Do"
+              value={endDate}
+              onChange={setEndDate}
+              mode="time"
+              placeholder="16:00"
+            />
           </View>
         </View>
         <View style={{ flexDirection: 'row', gap: spacing.md, marginTop: spacing.md }}>
