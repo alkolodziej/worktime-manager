@@ -78,7 +78,7 @@ export default function LoginScreen() {
           <Text style={styles.buttonText}>Zaloguj</Text>
         </TouchableOpacity>
 
-        <Text style={styles.hint}>To mock — wpisz dowolny e-mail i hasło.</Text>
+        {/* <Text style={styles.hint}>To mock — wpisz dowolny e-mail i hasło.</Text> */}
 
         <View style={{ alignItems: 'center', marginTop: spacing.sm }}>
           <TouchableOpacity onPress={() => setModeEmployer((v) => !v)}>

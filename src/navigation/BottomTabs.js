@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import HomeScreen from '../screens/HomeScreen';
 import ScheduleScreen from '../screens/ScheduleScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import EarningsCalculatorScreen from '../screens/EarningsCalculatorScreen';
 import { colors } from '../utils/theme';
 
 const Tab = createBottomTabNavigator();
@@ -29,11 +30,13 @@ export default function AppTabs() {
           if (route.name === 'Home') iconName = focused ? 'home' : 'home-outline';
           if (route.name === 'Schedule') iconName = focused ? 'calendar' : 'calendar-outline';
           if (route.name === 'Profile') iconName = focused ? 'person' : 'person-outline';
+          if (route.name === 'Earnings') iconName = focused ? 'cash' : 'cash-outline';
           return <Ionicons name={iconName} size={22} color={color} />;
         },
       })}
     >
       <Tab.Screen name="Home" component={HomeScreen} options={{ title: 'Start' }} />
+      <Tab.Screen name="Earnings" component={EarningsCalculatorScreen} options={{ title: 'Zarobki'}}/>
       <Tab.Screen name="Schedule" component={ScheduleScreen} options={{ title: 'Grafik' }} />
       <Tab.Screen name="Profile" component={ProfileScreen} options={{ title: 'Profil' }} />
     </Tab.Navigator>
