@@ -5,6 +5,7 @@ import Card from '../components/Card';
 import DateTimePicker from '../components/DateTimePicker';
 import { colors, spacing, radius } from '../utils/theme';
 import { apiGetShifts, apiCreateShift, apiDeleteShift, apiAssignShift } from '../utils/api';
+import { showToast } from '../components/Toast';
 
 export default function AdminShiftsScreen() {
   const [list, setList] = React.useState([]);
@@ -24,7 +25,10 @@ export default function AdminShiftsScreen() {
   React.useEffect(() => { load(); }, [load]);
 
   const onCreate = async () => {
-    if (!date || !startDate || !endDate) return;
+    if (!date || !startDate || !endDate) {
+      showToast('Wypełnij wszystkie pola', 'error');
+      return;
+    }
     try {
       const start = startDate.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', hour12: false });
       const end = endDate.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', hour12: false });
@@ -39,11 +43,30 @@ export default function AdminShiftsScreen() {
       setDate(null); 
       setStartDate(null);
       setEndDate(null);
-    } catch {}
+      showToast('Dodano zmianę', 'success');
+    } catch (error) {
+      showToast('Nie udało się dodać zmiany', 'error');
+    }
   };
 
-  const onDelete = async (id) => { try { await apiDeleteShift(id); await load(); } catch {} };
-  const onAssign = async (id, userId) => { try { await apiAssignShift(id, userId || null); await load(); } catch {} };
+  const onDelete = async (id) => { 
+    try { 
+      await apiDeleteShift(id); 
+      await load(); 
+      showToast('Usunięto zmianę', 'success');
+    } catch (error) {
+      showToast('Nie udało się usunąć zmiany', 'error');
+    } 
+  };
+  const onAssign = async (id, userId) => { 
+    try { 
+      await apiAssignShift(id, userId || null); 
+      await load(); 
+      showToast(userId ? 'Przypisano pracownika do zmiany' : 'Odłączono pracownika od zmiany', 'success');
+    } catch (error) {
+      showToast('Nie udało się zaktualizować przypisania', 'error');
+    } 
+  };
 
   return (
     <Screen>

@@ -6,6 +6,7 @@ import DateTimePicker from '../components/DateTimePicker';
 import { colors, spacing, radius } from '../utils/theme';
 import { useAuth } from '../context/AuthContext';
 import { apiGetAvailabilities, apiCreateAvailability, apiDeleteAvailability } from '../utils/api';
+import { showToast } from '../components/Toast';
 
 export default function AvailabilityScreen() {
   const { user } = useAuth();
@@ -28,7 +29,10 @@ export default function AvailabilityScreen() {
   React.useEffect(() => { load(); }, [load]);
 
   const onAdd = async () => {
-    if (!user?.id || !date || !startDate || !endDate) return;
+    if (!user?.id || !date || !startDate || !endDate) {
+      showToast('Wypełnij wszystkie pola', 'error');
+      return;
+    }
     try {
       const start = startDate.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', hour12: false });
       const end = endDate.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', hour12: false });
@@ -42,11 +46,20 @@ export default function AvailabilityScreen() {
       setStartDate(null);
       setEndDate(null);
       await load();
-    } catch {}
+      showToast('Dodano dostępność', 'success');
+    } catch (error) {
+      showToast('Nie udało się dodać dostępności', 'error');
+    }
   };
 
   const onDelete = async (id) => {
-    try { await apiDeleteAvailability(id); await load(); } catch {}
+    try { 
+      await apiDeleteAvailability(id); 
+      await load();
+      showToast('Usunięto dostępność', 'success');
+    } catch (error) {
+      showToast('Nie udało się usunąć dostępności', 'error');
+    }
   };
 
   return (
