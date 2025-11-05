@@ -94,6 +94,12 @@ app.get('/users/:id', (req, res) => {
   res.json(user);
 });
 
+// Get all users (for picker in admin screens)
+app.get('/users', (req, res) => {
+  const db = readDb();
+  res.json(db.users || []);
+});
+
 app.get('/shifts', (req, res) => {
   ensureSeed();
   const db = readDb();

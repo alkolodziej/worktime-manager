@@ -4,11 +4,12 @@ import Screen from '../components/Screen';
 import Card from '../components/Card';
 import DateTimePicker from '../components/DateTimePicker';
 import { colors, spacing, radius } from '../utils/theme';
-import { apiGetShifts, apiCreateShift, apiDeleteShift, apiAssignShift } from '../utils/api';
+import { apiGetShifts, apiCreateShift, apiDeleteShift, apiAssignShift, apiGetUsers } from '../utils/api';
 import { showToast } from '../components/Toast';
 
 export default function AdminShiftsScreen() {
   const [list, setList] = React.useState([]);
+  const [users, setUsers] = React.useState([]);
   const [loading, setLoading] = React.useState(false);
   const [date, setDate] = React.useState(null);
   const [startDate, setStartDate] = React.useState(null);
@@ -27,6 +28,12 @@ export default function AdminShiftsScreen() {
     } catch (error) {
       console.error('Failed to load shifts:', error);
       showToast('Nie udało się załadować zmian', 'error');
+    }
+    try {
+      const userList = await apiGetUsers();
+      setUsers(userList);
+    } catch (error) {
+      console.error('Failed to load users:', error);
     }
     setLoading(false);
   }, []);

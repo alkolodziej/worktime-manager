@@ -1,9 +1,11 @@
 import { Platform } from 'react-native';
 
 function getBaseUrl() {
-  // For Android emulator use 10.0.2.2, otherwise localhost
-  const host = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
+  // For Android or iOS emulator use 192.168.0.54, otherwise localhost
+  const host = Platform.OS === 'android' || Platform.OS === 'ios' ? '192.168.0.54' : 'localhost';
   const port = 4000;
+  console.log('host', host);
+  console.log('os', Platform.OS);
   return `http://${host}:${port}`;
 }
 
@@ -46,6 +48,11 @@ export async function apiClockOut({ userId, timestamp }) {
 // Company
 export async function apiGetCompany() {
   return http('/company');
+}
+
+// Users
+export async function apiGetUsers() {
+  return http('/users');
 }
 
 // Availabilities
