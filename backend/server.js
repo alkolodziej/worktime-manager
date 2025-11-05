@@ -296,7 +296,7 @@ app.post('/swaps/:id/cancel', (req, res) => {
   res.json(result.swap);
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   ensureSeed();
-  console.log(`WorkTime backend listening on http://localhost:${PORT}`);
+  console.log(`WorkTime backend listening on http://0.0.0.0:${PORT}`);
 });
