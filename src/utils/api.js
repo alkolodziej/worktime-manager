@@ -1,32 +1,22 @@
 import { Platform } from 'react-native';
-import * as Network from 'expo-network';
 
 let cachedBaseUrl = null;
 
-async function getBaseUrl() {
-  // Cache the URL to avoid repeated async calls
+function getBaseUrl() {
+  // Cache the URL to avoid repeated calls
   if (cachedBaseUrl) return cachedBaseUrl;
 
-  try {
-    // For Android/iOS Expo Go, get the device's local IP
-    if (Platform.OS === 'android' || Platform.OS === 'ios') {
-      const ipAddress = await Network.getIpAddressAsync();
-      cachedBaseUrl = `http://${ipAddress}:4000`;
-      console.log('Device IP:', ipAddress);
-      return cachedBaseUrl;
-    }
-  } catch (error) {
-    console.warn('Failed to get network IP:', error);
-  }
+  // Use environment variable for backend host, or default to localhost
+  const backendHost = process.env.EXPO_PUBLIC_BACKEND_HOST || 'localhost';
+  const backendPort = process.env.EXPO_PUBLIC_BACKEND_PORT || 4000;
 
-  // Fallback to localhost for web/development
-  cachedBaseUrl = 'http://localhost:4000';
-  console.log('Using fallback URL: localhost');
+  cachedBaseUrl = `http://${backendHost}:${backendPort}`;
+  console.log('Backend URL:', cachedBaseUrl);
   return cachedBaseUrl;
 }
 
 async function http(path, { method = 'GET', body } = {}) {
-  const baseUrl = await getBaseUrl();
+  const baseUrl = getBaseUrl();
   const res = await fetch(`${baseUrl}${path}`, {
     method,
     headers: {
