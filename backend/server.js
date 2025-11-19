@@ -3,7 +3,7 @@ const path = require('path');
 const express = require('express');
 const cors = require('cors');
 
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT || 8000;
 const DB_PATH = path.join(__dirname, 'db', 'db.json');
 
 function readDb() {
@@ -61,7 +61,20 @@ function findOrCreateUser(email) {
   let user = db.users.find(u => u.email === email);
   if (!user) {
     const id = String(db.users.length + 1);
-    user = { id, email, name: email.split('@')[0], role: 'Kelner' };
+    user = {
+      id,
+      email,
+      name: email.split('@')[0],
+      role: 'Kelner',
+      phone: '',
+      avatar: null,
+      hourlyRate: 30.5, // Minimum 30.5 zł/h default
+      preferences: {
+        notificationsEnabled: true,
+        remindersEnabled: true,
+        reminderMinutes: 30,
+      },
+    };
     db.users.push(user);
     writeDb(db);
   }
@@ -73,6 +86,19 @@ app.use(cors());
 app.use(express.json());
 
 app.get('/health', (req, res) => res.json({ ok: true }));
+
+app.get('/debug', (req, res) => {
+  const db = readDb();
+  res.json({
+    ok: true,
+    timestamp: new Date().toISOString(),
+    shifts: (db.shifts || []).length,
+    users: (db.users || []).length,
+    availabilities: (db.availabilities || []).length,
+    swaps: (db.swaps || []).length,
+    timesheets: (db.timesheets || []).length,
+  });
+});
 
 // Company (single-company setup)
 app.get('/company', (req, res) => {
@@ -116,6 +142,7 @@ app.post('/shifts', (req, res) => {
   if (!date || !start || !end) return res.status(400).json({ error: 'date, start, end required' });
   const db = readDb();
   const id = String((db.shifts?.length || 0) + 1);
+  const now = new Date().toISOString();
   const item = {
     id,
     date: new Date(date).toISOString(),
@@ -124,6 +151,8 @@ app.post('/shifts', (req, res) => {
     role: role || 'Zmiana',
     location: location || 'Lokal',
     assignedUserId: assignedUserId || null,
+    createdAt: now,
+    updatedAt: now,
   };
   db.shifts = db.shifts || [];
   db.shifts.push(item);
@@ -137,6 +166,7 @@ app.patch('/shifts/:id', (req, res) => {
   if (idx === -1) return res.status(404).json({ error: 'not found' });
   const updates = { ...req.body };
   if (updates.date) updates.date = new Date(updates.date).toISOString();
+  updates.updatedAt = new Date().toISOString();
   db.shifts[idx] = { ...db.shifts[idx], ...updates };
   writeDb(db);
   res.json(db.shifts[idx]);
@@ -214,7 +244,8 @@ app.post('/availabilities', (req, res) => {
   const db = readDb();
   db.availabilities = db.availabilities || [];
   const id = String(db.availabilities.length + 1);
-  const item = { id, userId, date: new Date(date).toISOString(), start, end, notes: notes || '' };
+  const now = new Date().toISOString();
+  const item = { id, userId, date: new Date(date).toISOString(), start, end, notes: notes || '', createdAt: now, updatedAt: now };
   db.availabilities.push(item);
   writeDb(db);
   res.json(item);
@@ -294,6 +325,199 @@ app.post('/swaps/:id/cancel', (req, res) => {
   const result = updateSwapStatus(id, 'cancelled');
   if (result.error) return res.status(404).json({ error: result.error });
   res.json(result.swap);
+});
+
+// ========== USER PROFILE ENDPOINTS ==========
+// Get user profile with extended info
+app.get('/users/:id/profile', (req, res) => {
+  const db = readDb();
+  const user = db.users.find(u => u.id === req.params.id);
+  if (!user) return res.status(404).json({ error: 'not found' });
+  res.json({
+    ...user,
+    phone: user.phone || '',
+    avatar: user.avatar || null,
+    preferences: user.preferences || {},
+  });
+});
+
+// Update user profile
+app.patch('/users/:id', (req, res) => {
+  const db = readDb();
+  const idx = db.users.findIndex(u => u.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: 'not found' });
+  
+  const updates = req.body || {};
+  const currentUserRole = updates._currentUserRole;
+  
+  // For authorization check - remove this helper field from updates
+  delete updates._currentUserRole;
+  
+  // Check authorization for sensitive fields
+  if (updates.hourlyRate && currentUserRole !== 'Pracodawca') {
+    return res.status(403).json({ error: 'Only employers can modify hourly rates' });
+  }
+  
+  // Whitelist fields that can be updated
+  const allowed = ['name', 'phone', 'avatar', 'preferences', 'role', 'hourlyRate'];
+  for (const field of allowed) {
+    if (field in updates) {
+      // Validate hourlyRate minimum 30.5 zł/h
+      if (field === 'hourlyRate') {
+        const rate = parseFloat(updates[field]);
+        if (isNaN(rate) || rate < 30.5) {
+          return res.status(400).json({ error: 'hourlyRate minimum is 30.5 zł/h' });
+        }
+        db.users[idx][field] = rate;
+      } else {
+        db.users[idx][field] = updates[field];
+      }
+    }
+  }
+  
+  writeDb(db);
+  res.json(db.users[idx]);
+});
+
+// ========== AVAILABILITY ENDPOINTS (EXTENDED) ==========
+// Update availability
+app.patch('/availabilities/:id', (req, res) => {
+  const db = readDb();
+  const idx = (db.availabilities || []).findIndex(a => a.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: 'not found' });
+  const updates = req.body || {};
+  if (updates.date) updates.date = new Date(updates.date).toISOString();
+  updates.updatedAt = new Date().toISOString();
+  db.availabilities[idx] = { ...db.availabilities[idx], ...updates };
+  writeDb(db);
+  res.json(db.availabilities[idx]);
+});
+
+// ========== STATISTICS ENDPOINTS ==========
+// Get user weekly statistics (hours worked)
+app.get('/users/:userId/stats/weekly', (req, res) => {
+  const db = readDb();
+  const userId = req.params.userId;
+  const user = db.users.find(u => u.id === userId);
+  if (!user) return res.status(404).json({ error: 'user not found' });
+
+  const today = new Date();
+  const weekStart = new Date(today);
+  weekStart.setDate(today.getDate() - today.getDay());
+  weekStart.setHours(0, 0, 0, 0);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekStart.getDate() + 7);
+
+  const timesheets = (db.timesheets || []).filter(t => 
+    t.userId === userId && 
+    new Date(t.clockIn) >= weekStart && 
+    new Date(t.clockIn) < weekEnd &&
+    t.clockOut
+  );
+
+  let totalMinutes = 0;
+  const dailyBreakdown = {};
+  timesheets.forEach(ts => {
+    const clockIn = new Date(ts.clockIn);
+    const clockOut = new Date(ts.clockOut);
+    const day = clockIn.toLocaleDateString('pl-PL', { weekday: 'short', month: 'short', day: 'numeric' });
+    const minutes = (clockOut - clockIn) / (1000 * 60);
+    totalMinutes += minutes;
+    dailyBreakdown[day] = (dailyBreakdown[day] || 0) + minutes;
+  });
+
+  res.json({
+    userId,
+    weekStart: weekStart.toISOString(),
+    weekEnd: weekEnd.toISOString(),
+    totalHours: (totalMinutes / 60).toFixed(2),
+    totalMinutes,
+    dailyBreakdown,
+    entriesCount: timesheets.length,
+  });
+});
+
+// Get all company statistics
+app.get('/stats/company', (req, res) => {
+  const db = readDb();
+  const stats = {
+    users: db.users.length,
+    activeUsers: (db.timesheets || []).filter(t => !t.clockOut).length,
+    shifts: db.shifts.length,
+    unassignedShifts: db.shifts.filter(s => !s.assignedUserId).length,
+    availabilities: (db.availabilities || []).length,
+    pendingSwaps: (db.swaps || []).filter(s => s.status === 'pending').length,
+    totalTimesheets: (db.timesheets || []).length,
+  };
+  res.json(stats);
+});
+
+// ========== CONTEXT ENDPOINT (load all relevant data for user) ==========
+app.get('/context/:userId', (req, res) => {
+  const db = readDb();
+  const userId = req.params.userId;
+  const user = db.users.find(u => u.id === userId);
+  if (!user) return res.status(404).json({ error: 'user not found' });
+
+  // Get user's shifts (assigned + unassigned if admin)
+  let userShifts = db.shifts || [];
+  if (user.role !== 'Pracodawca') {
+    userShifts = userShifts.filter(s => s.assignedUserId === userId);
+  }
+
+  // Get user's availabilities
+  const userAvailabilities = (db.availabilities || []).filter(a => a.userId === userId);
+
+  // Get user's swaps
+  const userSwaps = (db.swaps || []).filter(s => s.requesterId === userId || s.targetUserId === userId);
+
+  // Get user's timesheets
+  const userTimesheets = (db.timesheets || []).filter(t => t.userId === userId);
+
+  res.json({
+    user: {
+      ...user,
+      phone: user.phone || '',
+      avatar: user.avatar || null,
+      preferences: user.preferences || {},
+    },
+    shifts: userShifts,
+    availabilities: userAvailabilities,
+    swaps: userSwaps,
+    timesheets: userTimesheets,
+    company: db.company || { name: 'WorkTime' },
+  });
+});
+
+// ========== EMPLOYER ENDPOINTS (set hourly rates for employees) ==========
+// Set employee hourly rate (employer only)
+app.post('/employer/employees/:userId/rate', (req, res) => {
+  const { employerId, hourlyRate } = req.body || {};
+  if (!employerId || !hourlyRate) {
+    return res.status(400).json({ error: 'employerId and hourlyRate required' });
+  }
+
+  const db = readDb();
+  const employer = db.users.find(u => u.id === employerId);
+  if (!employer || employer.role !== 'Pracodawca') {
+    return res.status(403).json({ error: 'Only employer can set rates' });
+  }
+
+  const rateNum = parseFloat(hourlyRate);
+  if (isNaN(rateNum) || rateNum < 30.5) {
+    return res.status(400).json({ error: 'hourlyRate minimum is 30.5 zł/h' });
+  }
+
+  const employee = db.users.find(u => u.id === req.params.userId);
+  if (!employee) return res.status(404).json({ error: 'employee not found' });
+
+  employee.hourlyRate = rateNum;
+  writeDb(db);
+  res.json({
+    message: 'Rate updated',
+    userId: employee.id,
+    hourlyRate: employee.hourlyRate,
+  });
 });
 
 app.listen(PORT, '0.0.0.0', () => {

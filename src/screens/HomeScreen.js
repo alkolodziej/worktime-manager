@@ -135,7 +135,7 @@ export default function HomeScreen() {
 
   return (
     <Screen>
-      <Text style={styles.greeting}>Cześć, {user?.name?.split(' ')[0] || 'Użytkowniku'} 👋</Text>
+      <Text style={styles.greeting}>Cześć, {user?.name?.split(' ')[0] || 'Użytkowniku'}</Text>
 
       <SectionHeader title={todaysShift ? 'Dzisiejsza zmiana' : 'Najbliższa zmiana'} />
       <Card style={{ marginBottom: spacing.lg }}>
