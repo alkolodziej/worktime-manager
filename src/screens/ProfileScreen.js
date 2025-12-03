@@ -106,7 +106,6 @@ export default function ProfileScreen() {
                   await apiUpdateUserProfile(user.id, {
                     name: profileName,
                     phone: profilePhone,
-                    _currentUserRole: user.role,
                   });
                   setEditingProfile(false);
                   showToast('Dane zapisane', 'success');
@@ -213,7 +212,6 @@ export default function ProfileScreen() {
                     try {
                       await apiUpdateUserProfile(editingEmployee.id, { 
                         hourlyRate: rateNum,
-                        _currentUserRole: user.role,
                       });
                       showToast('Stawka zapisana', 'success');
                       setEditingEmployee(null);

@@ -8,21 +8,25 @@ import SectionHeader from '../components/SectionHeader';
 import { dayNamePl, formatDateLabel, formatTimeRange } from '../utils/format';
 import { apiGetShifts } from '../utils/api';
 import { showToast } from '../components/Toast';
+import { useAuth } from '../context/AuthContext';
 
 export default function ScheduleScreen() {
+  const { user } = useAuth();
   const [range, setRange] = React.useState('week'); // 'week' | 'month'
   const [base, setBase] = React.useState([]);
   React.useEffect(() => {
+    if (!user?.id) return;
     (async () => {
       try {
-        const list = await apiGetShifts({});
+        // Backend filters by assignedUserId — no client-side filtering needed
+        const list = await apiGetShifts({ assignedUserId: user.id });
         setBase(list);
       } catch (error) {
         console.error('Failed to fetch shifts:', error);
         showToast('Nie udało się załadować grafiku', 'error');
       }
     })();
-  }, []);
+  }, [user?.id]);
   const filtered = React.useMemo(() => filterByRange(base, range), [base, range]);
   const sections = React.useMemo(() => groupByDate(filtered), [filtered]);
   return (

@@ -15,6 +15,7 @@ export function formatDateLabel(date) {
 
 export function minutesToHhMm(mins) {
   const h = Math.floor(mins / 60);
-  const m = mins % 60;
+  
+  const m = (mins % 60).toFixed(2);
   return `${h} h ${m} min`;
 }

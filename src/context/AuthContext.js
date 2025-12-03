@@ -10,12 +10,14 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // Load persisted session on app start (infinite session)
   useEffect(() => {
     (async () => {
       try {
         const raw = await AsyncStorage.getItem(STORAGE_KEY);
         if (raw) {
-          setUser(JSON.parse(raw));
+          const parsed = JSON.parse(raw);
+          setUser(parsed);
         }
       } catch (e) {
         console.warn('Failed to load session', e);
@@ -36,10 +38,19 @@ export function AuthProvider({ children }) {
         avatarUri: avatarUri || null,
       };
       setUser(nextUser);
+      // Store session indefinitely (no expiry) in AsyncStorage
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(nextUser));
     } catch (e) {
       // Fallback to local-only session if backend unavailable
-      const nextUser = { id: null, email, name: email.split('@')[0], role: roleOverride || 'Kelner', avatarUri: avatarUri || null };
+      // This allows offline mode: user can still use app with local data
+      const nextUser = { 
+        id: email, // Use email as temp ID when offline
+        email, 
+        name: email.split('@')[0], 
+        role: roleOverride || 'Kelner', 
+        avatarUri: avatarUri || null,
+        isOffline: true, // Flag to indicate offline session
+      };
       setUser(nextUser);
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(nextUser));
     }

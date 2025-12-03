@@ -25,6 +25,8 @@ import {
   apiGetAvailabilities,
   apiGetUsers,
   apiGetShifts,
+  apiUpdateShift,
+  apiDeleteShift,
 } from '../utils/api';
 
 const ROLES = ['Kelner', 'Barista', 'Kucharz'];
@@ -207,6 +209,27 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#B45309',
   },
+  forceAssignCheckbox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    marginTop: spacing.md,
+    backgroundColor: '#F3E8FF',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#DDD6FE',
+  },
+  checkboxBox: {
+    fontSize: 18,
+    marginRight: spacing.md,
+  },
+  checkboxLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: colors.text,
+    flex: 1,
+  },
   summaryTitle: {
     fontSize: 14,
     fontWeight: '700',
@@ -242,6 +265,20 @@ const styles = StyleSheet.create({
   submitButtonText: {
     fontSize: 16,
     fontWeight: '700',
+    color: '#fff',
+  },
+  cancelEditButton: {
+    backgroundColor: '#EF4444',
+    borderRadius: 12,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+    marginTop: spacing.md,
+    borderWidth: 2,
+    borderColor: '#DC2626',
+  },
+  cancelEditButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
     color: '#fff',
   },
   modalOverlay: {
@@ -435,6 +472,85 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.primary,
   },
+  shiftsListContainer: {
+    marginBottom: spacing.lg,
+  },
+  shiftListItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F4F8',
+    backgroundColor: '#F8FAFC',
+  },
+  shiftListItemContent: {
+    flex: 1,
+    marginRight: spacing.md,
+  },
+  shiftListEmployee: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: spacing.sm,
+  },
+  shiftListTime: {
+    fontSize: 13,
+    color: colors.muted,
+    marginBottom: 2,
+  },
+  shiftListRole: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: colors.primary,
+  },
+  shiftListActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  shiftActionButton: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#E0E4EA',
+    backgroundColor: '#fff',
+    minWidth: 40,
+    alignItems: 'center',
+  },
+  shiftActionButtonDanger: {
+    borderColor: '#EF4444',
+    backgroundColor: '#FEE2E2',
+  },
+  shiftActionButtonText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  shiftActionButtonTextDanger: {
+    color: '#DC2626',
+  },
+  emptyShiftsText: {
+    fontSize: 14,
+    color: colors.muted,
+    fontWeight: '500',
+    textAlign: 'center',
+    paddingVertical: spacing.lg,
+  },
+  toggleButton: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: 6,
+    backgroundColor: '#E0F2FE',
+    marginBottom: spacing.md,
+  },
+  toggleButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.primary,
+  },
 });
 
 function PickerModal({ visible, title, items, selected, onSelect, onClose }) {
@@ -490,6 +606,11 @@ export default function AdminShiftsScreen() {
   const [shifts, setShifts] = React.useState([]);
   const [users, setUsers] = React.useState([]);
   const [availabilities, setAvailabilities] = React.useState([]);
+  const [showShiftsList, setShowShiftsList] = React.useState(true);
+  const [editingShiftId, setEditingShiftId] = React.useState(null);
+  const [forceAssignOverride, setForceAssignOverride] = React.useState(false);
+  
+  const scrollViewRef = React.useRef(null);
 
   // Form state
   const [selectedDate, setSelectedDate] = React.useState(new Date());
@@ -506,8 +627,6 @@ export default function AdminShiftsScreen() {
   const [showEmployeePicker, setShowEmployeePicker] = React.useState(false);
   const [showStartTimePicker, setShowStartTimePicker] = React.useState(false);
   const [showEndTimePicker, setShowEndTimePicker] = React.useState(false);
-  const [showDatePicker, setShowDatePicker] = React.useState(false);
-  const [tempDate, setTempDate] = React.useState(selectedDate);
 
   const loadData = useCallback(async () => {
     try {
@@ -546,6 +665,11 @@ export default function AdminShiftsScreen() {
     return users.filter(u => availableUserIds.includes(u.id));
   }, [selectedDate, availabilities, users]);
 
+  // Get employees list - all if forceAssignOverride, otherwise only available
+  const getEmployeesForPicker = useCallback(() => {
+    return forceAssignOverride ? users : getAvailableEmployees();
+  }, [forceAssignOverride, users, getAvailableEmployees]);
+
   // Get employee's available hours for the selected date
   const getEmployeeAvailability = useCallback(() => {
     if (!selectedEmployee) return null;
@@ -560,28 +684,35 @@ export default function AdminShiftsScreen() {
   const validateShiftTimes = useCallback(() => {
     if (!startTime || !endTime) return { valid: false, message: 'Podaj godziny' };
     
-    const empAvail = getEmployeeAvailability();
-    if (!empAvail) return { valid: false, message: 'Brak dostępności pracownika' };
+    // Skip availability check if forceAssignOverride is active
+    if (!forceAssignOverride) {
+      const empAvail = getEmployeeAvailability();
+      if (!empAvail) return { valid: false, message: 'Brak dostępności pracownika' };
 
+      const shiftStart = parseInt(startTime.replace(':', ''));
+      const shiftEnd = parseInt(endTime.replace(':', ''));
+      const availStart = parseInt(empAvail.start.replace(':', ''));
+      const availEnd = parseInt(empAvail.end.replace(':', ''));
+
+      if (shiftStart < availStart || shiftEnd > availEnd) {
+        return {
+          valid: false,
+          message: `Zmiana poza dostępnością (${empAvail.start} - ${empAvail.end})`,
+          empAvail,
+        };
+      }
+    }
+
+    // Always check time logic
     const shiftStart = parseInt(startTime.replace(':', ''));
     const shiftEnd = parseInt(endTime.replace(':', ''));
-    const availStart = parseInt(empAvail.start.replace(':', ''));
-    const availEnd = parseInt(empAvail.end.replace(':', ''));
-
-    if (shiftStart < availStart || shiftEnd > availEnd) {
-      return {
-        valid: false,
-        message: `Zmiana poza dostępnością (${empAvail.start} - ${empAvail.end})`,
-        empAvail,
-      };
-    }
 
     if (shiftStart >= shiftEnd) {
       return { valid: false, message: 'Godzina końcowa musi być później niż początkowa' };
     }
 
     return { valid: true };
-  }, [startTime, endTime, getEmployeeAvailability]);
+  }, [startTime, endTime, getEmployeeAvailability, forceAssignOverride]);
 
   const handleCreateShift = async () => {
     if (!selectedEmployee) {
@@ -645,26 +776,8 @@ export default function AdminShiftsScreen() {
     setSelectedRole('Kelner');
     setSelectedLocation('Lokal główny');
     setSelectedEmployee(null);
-  };
-
-  const handleDateSelect = (event, date) => {
-    if (date) {
-      setTempDate(date);
-    }
-  };
-
-  const handleConfirmDate = () => {
-    setSelectedDate(tempDate);
-    setShowDatePicker(false);
-    setShowTimeInputs(false);
-    setStartTime('');
-    setEndTime('');
-    setSelectedEmployee(null);
-  };
-
-  const handleCancelDatePicker = () => {
-    setTempDate(selectedDate);
-    setShowDatePicker(false);
+    setEditingShiftId(null);
+    setForceAssignOverride(false);
   };
 
   const handleCancelTimes = () => {
@@ -677,89 +790,192 @@ export default function AdminShiftsScreen() {
   const empAvail = getEmployeeAvailability();
   const timeValidation = validateShiftTimes();
 
+  const handleDeleteShift = (shiftId) => {
+    Alert.alert(
+      'Usuń zmianę',
+      'Czy na pewno chcesz usunąć tę zmianę?',
+      [
+        { text: 'Anuluj', style: 'cancel' },
+        {
+          text: 'Usuń',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setLoading(true);
+              await apiDeleteShift(shiftId);
+              showToast('Zmiana usunięta', 'success');
+              await loadData();
+            } catch (error) {
+              console.error('Delete shift error:', error);
+              showToast('Błąd usuwania zmiany', 'error');
+            } finally {
+              setLoading(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleEditShift = (shift) => {
+    // Pre-populate form with shift data
+    setSelectedDate(typeof shift.date === 'string' ? new Date(shift.date) : shift.date);
+    setStartTime(shift.start);
+    setEndTime(shift.end);
+    setSelectedRole(shift.role);
+    setSelectedLocation(shift.location || 'Lokal główny');
+    setEditingShiftId(shift.id);
+    setShowTimeInputs(true);
+    // Find employee
+    const emp = users.find(u => u.id === shift.assignedUserId);
+    if (emp) setSelectedEmployee(emp);
+    
+    // Hide shifts list and scroll to form
+    setShowShiftsList(false);
+    setTimeout(() => {
+      scrollViewRef.current?.scrollTo({ y: 300, animated: true });
+    }, 100);
+    
+    // Show toast feedback
+    showToast('Zmiana załadowana do edycji', 'success');
+  };
+
+  const handleUpdateShift = async () => {
+    if (!selectedEmployee) {
+      showToast('Wybierz pracownika', 'error');
+      return;
+    }
+
+    const validation = validateShiftTimes();
+    if (!validation.valid) {
+      showToast(validation.message, 'error');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      await apiUpdateShift(editingShiftId, {
+        date: selectedDate.toISOString(),
+        start: startTime,
+        end: endTime,
+        role: selectedRole,
+        location: selectedLocation,
+        assignedUserId: selectedEmployee.id,
+      });
+
+      showToast('Zmiana zaktualizowana', 'success');
+      setEditingShiftId(null);
+      resetForm();
+      await loadData();
+    } catch (error) {
+      console.error('Update shift error:', error);
+      showToast('Błąd aktualizacji zmiany', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const formatShiftDate = (date) => {
+    if (typeof date === 'string') {
+      date = new Date(date);
+    }
+    return date.toLocaleDateString('pl-PL', { month: 'short', day: 'numeric' });
+  };
+
   return (
     <Screen>
       <Toast />
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView ref={scrollViewRef} showsVerticalScrollIndicator={false}>
         <Text style={styles.title}>Tworzenie grafiku</Text>
         <Text style={styles.subtitle}>Krok po kroku przypisz zmianę</Text>
 
-        {/* Step 1: Date Picker */}
-        <Card style={{ marginTop: spacing.lg }}>
-          <Text style={styles.stepNumber}>Krok 1: Data</Text>
-          <Text style={styles.fieldLabel}>Wybierz dzień</Text>
+        {/* Shifts List Section */}
+        <View style={styles.shiftsListContainer}>
           <TouchableOpacity
-            style={styles.activateButton}
-            onPress={() => {
-              setShowDatePicker(!showDatePicker);
-              setTempDate(selectedDate);
-            }}
+            style={styles.toggleButton}
+            onPress={() => setShowShiftsList(!showShiftsList)}
           >
-            <Text style={styles.activateButtonText}>
-              {showDatePicker ? '▼ Ukryj datownik' : '▶ Pokaż datownik'}
+            <Text style={styles.toggleButtonText}>
+              {showShiftsList ? '▼ Ukryj listę zmian' : '▶ Pokaż listę zmian'} ({shifts.length})
             </Text>
           </TouchableOpacity>
-          
-          {showDatePicker && (
-            <View style={{ marginVertical: spacing.md, paddingVertical: spacing.md, borderRadius: 8, backgroundColor: '#f9f9f9' }}>
-              <Text style={{ marginHorizontal: spacing.md, marginBottom: spacing.sm, fontSize: 14, fontWeight: '500', color: '#666' }}>
-                {tempDate.toLocaleDateString('pl-PL', {
-                  weekday: 'long',
-                  year: 'numeric',
-                  month: 'long',
-                  day: 'numeric',
-                })}
-              </Text>
-              
-              <DateTimePicker
-                value={tempDate}
-                onChange={handleDateSelect}
-                mode="date"
-              />
-              
-              <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md, marginHorizontal: spacing.md }}>
-                <TouchableOpacity
-                  style={{
-                    flex: 1,
-                    paddingVertical: spacing.md,
-                    paddingHorizontal: spacing.lg,
-                    backgroundColor: '#e8e8e8',
-                    borderRadius: 8,
-                    alignItems: 'center',
+
+          {showShiftsList && (
+            <Card>
+              {shifts.length > 0 ? (
+                <FlatList
+                  data={shifts}
+                  keyExtractor={(item) => item.id}
+                  scrollEnabled={false}
+                  renderItem={({ item: shift }) => {
+                    const employee = users.find(u => u.id === shift.assignedUserId);
+                    return (
+                      <View key={shift.id} style={styles.shiftListItem}>
+                        <View style={styles.shiftListItemContent}>
+                          <Text style={styles.shiftListEmployee}>
+                            {employee?.name || 'Nieznany pracownik'}
+                          </Text>
+                          <Text style={styles.shiftListTime}>
+                            {formatShiftDate(shift.date)} • {shift.start} - {shift.end}
+                          </Text>
+                          <Text style={styles.shiftListRole}>
+                            {shift.role} • {shift.location || 'Lokal główny'}
+                          </Text>
+                        </View>
+                        <View style={styles.shiftListActions}>
+                          <TouchableOpacity
+                            style={styles.shiftActionButton}
+                            onPress={() => handleEditShift(shift)}
+                          >
+                            <Text style={styles.shiftActionButtonText}>✏️</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[
+                              styles.shiftActionButton,
+                              styles.shiftActionButtonDanger,
+                            ]}
+                            onPress={() => handleDeleteShift(shift.id)}
+                          >
+                            <Text
+                              style={[
+                                styles.shiftActionButtonText,
+                                styles.shiftActionButtonTextDanger,
+                              ]}
+                            >
+                              🗑️
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    );
                   }}
-                  onPress={handleCancelDatePicker}
-                >
-                  <Text style={{
-                    fontSize: 16,
-                    fontWeight: '600',
-                    color: '#333',
-                  }}>
-                    Anuluj
-                  </Text>
-                </TouchableOpacity>
-                
-                <TouchableOpacity
-                  style={{
-                    flex: 1,
-                    paddingVertical: spacing.md,
-                    paddingHorizontal: spacing.lg,
-                    backgroundColor: colors.primary,
-                    borderRadius: 8,
-                    alignItems: 'center',
-                  }}
-                  onPress={handleConfirmDate}
-                >
-                  <Text style={{
-                    fontSize: 16,
-                    fontWeight: '600',
-                    color: '#fff',
-                  }}>
-                    Potwierdź
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
+                />
+              ) : (
+                <Text style={styles.emptyShiftsText}>Brak zmian do wyświetlenia</Text>
+              )}
+            </Card>
           )}
+        </View>
+
+        {/* Step 1: Date Picker */}
+        <Card style={{ 
+          marginTop: spacing.lg,
+          backgroundColor: editingShiftId ? '#FEF3C7' : '#fff',
+          borderWidth: editingShiftId ? 2 : 1,
+          borderColor: editingShiftId ? colors.primary : '#E6EAF2'
+        }}>
+          <Text style={styles.stepNumber}>
+            {editingShiftId ? 'Edycja - Krok 1: Data' : 'Krok 1: Data'}
+          </Text>
+          <Text style={styles.fieldLabel}>Wybierz dzień</Text>
+          
+          <DateTimePicker
+            value={selectedDate}
+            onChange={(event, date) => {
+              if (date) setSelectedDate(date);
+            }}
+            mode="date"
+          />
           
           <Text style={styles.selectedValue}>
             {selectedDate.toLocaleDateString('pl-PL', {
@@ -772,16 +988,23 @@ export default function AdminShiftsScreen() {
         </Card>
 
         {/* Step 2: Select Employee */}
-        <Card style={{ opacity: showTimeInputs ? 0.6 : 1 }}>
+        <Card style={{ 
+          opacity: showTimeInputs ? 0.6 : 1,
+          backgroundColor: editingShiftId ? '#FEF3C7' : '#fff',
+          borderWidth: editingShiftId ? 2 : 1,
+          borderColor: editingShiftId ? colors.primary : '#E6EAF2'
+        }}>
           <Text style={styles.stepNumber}>Krok 2: Pracownik</Text>
           <View style={{ marginBottom: spacing.md }}>
             <Text style={styles.fieldLabel}>Dostępni pracownicy</Text>
             <Text style={styles.helperText}>
-              {availableEmployees.length} dostępny/ych
+              {forceAssignOverride ? 'Wszyscy pracownicy' : `${availableEmployees.length} dostępny/ych`}
+              {editingShiftId && forceAssignOverride && ' (tryb override)'}
             </Text>
           </View>
 
-          {availableEmployees.length > 0 ? (
+          {/* Main employee picker - shown when available OR forceAssign is active */}
+          {(availableEmployees.length > 0 || forceAssignOverride) ? (
             <TouchableOpacity
               style={styles.pickerButton}
               onPress={() => setShowEmployeePicker(true)}
@@ -801,6 +1024,21 @@ export default function AdminShiftsScreen() {
               <Text style={styles.noAvailableSubtext}>w tym dniu</Text>
             </View>
           )}
+          
+          {/* Force assign checkbox - shown when no available employees OR in edit mode */}
+          {(availableEmployees.length === 0 || editingShiftId) && (
+            <TouchableOpacity
+              style={styles.forceAssignCheckbox}
+              onPress={() => setForceAssignOverride(!forceAssignOverride)}
+            >
+              <Text style={styles.checkboxBox}>
+                {forceAssignOverride ? '☑️' : '☐'}
+              </Text>
+              <Text style={styles.checkboxLabel}>
+                Przypisz pomimo braku dyspozycyjności
+              </Text>
+            </TouchableOpacity>
+          )}
 
           {/* Show employee's availability when selected */}
           {selectedEmployee && empAvail && (
@@ -818,7 +1056,11 @@ export default function AdminShiftsScreen() {
 
         {/* Step 3: Time Selection */}
         {selectedEmployee && (
-          <Card style={{ backgroundColor: showTimeInputs ? '#F0F9FF' : '#fff' }}>
+          <Card style={{ 
+            backgroundColor: editingShiftId ? '#FEF3C7' : (showTimeInputs ? '#F0F9FF' : '#fff'),
+            borderWidth: editingShiftId ? 2 : 1,
+            borderColor: editingShiftId ? colors.primary : '#E6EAF2'
+          }}>
             <Text style={styles.stepNumber}>Krok 3: Godziny</Text>
             
             {!showTimeInputs ? (
@@ -884,7 +1126,11 @@ export default function AdminShiftsScreen() {
 
         {/* Step 4: Role & Location */}
         {selectedEmployee && showTimeInputs && startTime && endTime && (
-          <Card>
+          <Card style={{
+            backgroundColor: editingShiftId ? '#FEF3C7' : '#fff',
+            borderWidth: editingShiftId ? 2 : 1,
+            borderColor: editingShiftId ? colors.primary : '#E6EAF2'
+          }}>
             <Text style={styles.stepNumber}>Krok 4: Szczegóły</Text>
             <Text style={styles.fieldLabel}>Stanowisko i miejsce</Text>
             
@@ -945,19 +1191,39 @@ export default function AdminShiftsScreen() {
 
         {/* Submit Button */}
         {selectedEmployee && showTimeInputs && startTime && endTime && (
-          <TouchableOpacity
-            style={[styles.submitButton, { opacity: loading ? 0.6 : 1 }]}
-            onPress={handleCreateShift}
-            disabled={loading || !timeValidation.valid}
-          >
-            {loading ? (
-              <ActivityIndicator color="#fff" size="small" />
-            ) : (
-              <Text style={styles.submitButtonText}>
-                {timeValidation.valid ? '✓ Przypisz zmianę' : '⚠️ Nieprawidłowe godziny'}
-              </Text>
+          <View>
+            <TouchableOpacity
+              style={[styles.submitButton, { opacity: loading ? 0.6 : 1 }]}
+              onPress={editingShiftId ? handleUpdateShift : handleCreateShift}
+              disabled={loading || !timeValidation.valid}
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={styles.submitButtonText}>
+                  {editingShiftId
+                    ? timeValidation.valid
+                      ? '✓ Zaktualizuj zmianę'
+                      : '⚠️ Nieprawidłowe godziny'
+                    : timeValidation.valid
+                    ? '✓ Przypisz zmianę'
+                    : '⚠️ Nieprawidłowe godziny'}
+                </Text>
+              )}
+            </TouchableOpacity>
+            
+            {editingShiftId && (
+              <TouchableOpacity
+                style={styles.cancelEditButton}
+                onPress={() => {
+                  resetForm();
+                  showToast('Edycja anulowana', 'info');
+                }}
+              >
+                <Text style={styles.cancelEditButtonText}>Anuluj edycję</Text>
+              </TouchableOpacity>
             )}
-          </TouchableOpacity>
+          </View>
         )}
 
         <View style={{ height: spacing.xl }} />
@@ -1021,15 +1287,18 @@ export default function AdminShiftsScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Wybierz pracownika</Text>
+              <Text style={styles.modalTitle}>
+                Wybierz pracownika
+                {forceAssignOverride && <Text style={{ fontSize: 12, color: colors.primary }}> (All)</Text>}
+              </Text>
               <TouchableOpacity onPress={() => setShowEmployeePicker(false)}>
                 <Text style={styles.closeButton}>✕</Text>
               </TouchableOpacity>
             </View>
 
-            {availableEmployees.length > 0 ? (
+            {getEmployeesForPicker().length > 0 ? (
               <FlatList
-                data={availableEmployees}
+                data={getEmployeesForPicker()}
                 keyExtractor={(item) => item.id}
                 renderItem={({ item }) => (
                   <TouchableOpacity

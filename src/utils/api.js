@@ -60,10 +60,11 @@ export async function apiLogin(email) {
   return http('/login', { method: 'POST', body: { email } });
 }
 
-export async function apiGetShifts({ from, to } = {}) {
+export async function apiGetShifts({ from, to, assignedUserId } = {}) {
   const params = new URLSearchParams();
   if (from) params.set('from', from.toISOString());
   if (to) params.set('to', to.toISOString());
+  if (assignedUserId) params.set('assignedUserId', assignedUserId);
   const data = await http(`/shifts${params.toString() ? `?${params.toString()}` : ''}`);
   // Convert date strings to Date objects
   return data.map((s) => ({ ...s, date: new Date(s.date) }));
@@ -152,6 +153,11 @@ export async function apiGetTimesheets({ userId, from, to } = {}) {
   if (from) params.set('from', from.toISOString());
   if (to) params.set('to', to.toISOString());
   return http(`/timesheets${params.toString() ? `?${params.toString()}` : ''}`);
+}
+
+// Get active (ongoing) timesheet — useful for app restart persistence
+export async function apiGetActiveTimesheet(userId) {
+  return http(`/timesheets/active/${userId}`);
 }
 
 // User profile endpoints

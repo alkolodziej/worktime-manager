@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Modal, ScrollView } from 'react-native';
 import { colors, spacing, radius } from '../utils/theme';
 import Screen from '../components/Screen';
 import Card from '../components/Card';
@@ -18,17 +18,21 @@ export default function HomeScreen() {
   const todayStr = today.toLocaleDateString('pl-PL');
   const [shifts, setShifts] = React.useState([]);
   const [timesheets, setTimesheets] = React.useState([]);
+  const [showShiftModal, setShowShiftModal] = React.useState(false);
+  const [selectedShift, setSelectedShift] = React.useState(null);
 
   React.useEffect(() => {
+    if (!user?.id) return;
     (async () => {
       try {
-        const list = await apiGetShifts({});
+        // Backend filters by assignedUserId — no client-side filtering needed
+        const list = await apiGetShifts({ assignedUserId: user.id });
         setShifts(list);
       } catch (error) {
         console.error('Failed to fetch shifts:', error);
       }
     })();
-  }, [todayStr]);
+  }, [user?.id]);
 
   React.useEffect(() => {
     if (!user?.id) return;
@@ -142,13 +146,24 @@ export default function HomeScreen() {
         {!nextShift ? (
           <Text style={styles.countdown}>Brak zaplanowanych zmian</Text>
         ) : (
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <View>
-            <Text style={styles.shiftText}>{formatTimeRange(nextShift.start, nextShift.end)}</Text>
-            <Text style={styles.metaText}>{nextShift.location} • {nextShift.role}</Text>
+        <TouchableOpacity
+          onPress={() => {
+            setSelectedShift(nextShift);
+            setShowShiftModal(true);
+          }}
+          activeOpacity={0.7}
+        >
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <View>
+              <Text style={styles.shiftText}>{formatTimeRange(nextShift.start, nextShift.end)}</Text>
+              <Text style={styles.metaText}>{nextShift.location} • {nextShift.role}</Text>
+            </View>
+            <View>
+              <Badge label={todaysShift ? 'Dziś' : 'Jutro/Przyszłe'} tone={todaysShift ? 'success' : 'info'} />
+              <Ionicons name="chevron-forward" size={20} color={colors.muted} style={{ marginTop: spacing.sm }} />
+            </View>
           </View>
-          <Badge label={todaysShift ? 'Dziś' : 'Jutro/Przyszłe'} tone={todaysShift ? 'success' : 'info'} />
-        </View>
+        </TouchableOpacity>
         )}
         {nextShift && beforeStart && (
           <Text style={styles.countdown}>Start za {countdownLabel}</Text>
@@ -196,6 +211,62 @@ export default function HomeScreen() {
         <QuickAction icon="swap-horizontal-outline" label="Zamiana zmiany" />
         <QuickAction icon="document-text-outline" label="Zobacz regulamin" />
       </View>
+
+      {/* Shift Details Modal */}
+      <Modal
+        visible={showShiftModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowShiftModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Szczegóły zmiany</Text>
+              <TouchableOpacity onPress={() => setShowShiftModal(false)}>
+                <Ionicons name="close" size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.lg }}>
+              {selectedShift && (
+                <>
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>📅 Data</Text>
+                    <Text style={styles.detailValue}>
+                      {new Date(selectedShift.date).toLocaleDateString('pl-PL', {
+                        weekday: 'long',
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric',
+                      })}
+                    </Text>
+                  </View>
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>🕐 Godziny</Text>
+                    <Text style={styles.detailValue}>
+                      {formatTimeRange(selectedShift.start, selectedShift.end)}
+                    </Text>
+                  </View>
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>📍 Lokalizacja</Text>
+                    <Text style={styles.detailValue}>{selectedShift.location || 'Lokal główny'}</Text>
+                  </View>
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>💼 Stanowisko</Text>
+                    <Text style={styles.detailValue}>{selectedShift.role}</Text>
+                  </View>
+                  {selectedShift.notes && (
+                    <View style={styles.detailRow}>
+                      <Text style={styles.detailLabel}>📝 Notatki</Text>
+                      <Text style={styles.detailValue}>{selectedShift.notes}</Text>
+                    </View>
+                  )}
+                </>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </Screen>
   );
 }
@@ -327,5 +398,46 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     color: colors.success,
     fontWeight: '700',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    maxHeight: '80%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E0E4EA',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  detailRow: {
+    paddingVertical: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F4F8',
+  },
+  detailLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.muted,
+    marginBottom: spacing.sm,
+  },
+  detailValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.text,
   },
 });

@@ -1,9 +1,11 @@
 const fs = require('fs');
 const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 const express = require('express');
 const cors = require('cors');
 
-const PORT = process.env.PORT || 8000;
+const PORT = Number(process.env.PORT || process.env.BACKEND_PORT || 8000);
+const HOST = process.env.HOST || process.env.BACKEND_HOST || '0.0.0.0';
 const DB_PATH = path.join(__dirname, 'db', 'db.json');
 
 function readDb() {
@@ -27,10 +29,8 @@ function addMinutesToHHMM(hhmm, minutes) {
 
 function ensureSeed() {
   const db = readDb();
-  const now = Date.now();
-  // Reseed once a day at minimum
-  const oneDay = 24 * 60 * 60 * 1000;
-  if (!db.meta || !db.meta.seededAt || now - db.meta.seededAt > oneDay || !db.shifts || db.shifts.length === 0) {
+  // Only seed if DB is completely empty (first run) — preserve manual shifts after creation
+  if (!db.shifts || db.shifts.length === 0) {
     const start = addDays(new Date(), 0);
     const roles = ['Kelner', 'Barista'];
     const locations = ['Restauracja Centralna', 'Kawiarnia A'];
@@ -51,8 +51,10 @@ function ensureSeed() {
       newShifts.push({ id: String(idCounter++), date: date.toISOString(), start: startStr, end: endStr, role, location });
     }
     db.shifts = newShifts;
-    db.meta = { seededAt: now };
+    db.meta = db.meta || {};
+    db.meta.seededAt = Date.now();
     writeDb(db);
+    console.log(`[Seed] Generated ${newShifts.length} initial shifts on first run.`);
   }
 }
 
@@ -129,10 +131,19 @@ app.get('/users', (req, res) => {
 app.get('/shifts', (req, res) => {
   ensureSeed();
   const db = readDb();
-  const { from, to } = req.query;
+  const { from, to, assignedUserId, role } = req.query;
   let list = db.shifts.map(s => ({ ...s, date: s.date }));
+  
+  // Filter by date range
   if (from) list = list.filter(s => new Date(s.date) >= new Date(from));
   if (to) list = list.filter(s => new Date(s.date) <= new Date(to));
+  
+  // Filter by assigned user (most common use case: employee sees only their shifts)
+  if (assignedUserId) list = list.filter(s => s.assignedUserId === assignedUserId);
+  
+  // Filter by role (optional)
+  if (role) list = list.filter(s => s.role === role);
+  
   res.json(list);
 });
 
@@ -227,6 +238,15 @@ app.post('/timesheets/clock-out', (req, res) => {
   res.json(active);
 });
 
+// Get active (ongoing) timesheet for a user
+app.get('/timesheets/active/:userId', (req, res) => {
+  const db = readDb();
+  const { userId } = req.params;
+  const active = (db.timesheets || []).find(t => t.userId === userId && !t.clockOut);
+  if (!active) return res.status(404).json({ error: 'not clocked in' });
+  res.json(active);
+});
+
 // Availability endpoints
 app.get('/availabilities', (req, res) => {
   const db = readDb();
@@ -298,19 +318,31 @@ function updateSwapStatus(id, status) {
 app.post('/swaps/:id/accept', (req, res) => {
   const { id } = req.params;
   const { actorUserId } = req.body || {};
+  const db = readDb();
+  
+  // Validate: can only accept if you're either requester or target
+  const swap = (db.swaps || []).find(s => s.id === id);
+  if (!swap) return res.status(404).json({ error: 'swap not found' });
+  
+  const isRequester = swap.requesterId === actorUserId;
+  const isTarget = swap.targetUserId === actorUserId;
+  if (!isRequester && !isTarget && actorUserId) {
+    return res.status(403).json({ error: 'Only requester or target can accept' });
+  }
+  
+  // Update swap status
   const result = updateSwapStatus(id, 'accepted');
   if (result.error) return res.status(404).json({ error: result.error });
-  // Optionally reassign shift to actor or target user
-  if (actorUserId) {
-    const db = readDb();
-    const swap = db.swaps.find(s => s.id === id);
-    const shift = db.shifts.find(s => s.id === swap.shiftId);
-    if (shift) {
-      shift.assignedUserId = actorUserId;
-      writeDb(db);
-    }
+  
+  // **IMPORTANT**: Reassign shift to the requester (who wanted the swap)
+  const updatedSwap = (db.swaps || []).find(s => s.id === id);
+  const shift = db.shifts.find(s => s.id === updatedSwap.shiftId);
+  if (shift && updatedSwap) {
+    shift.assignedUserId = updatedSwap.requesterId;
+    writeDb(db);
   }
-  res.json(result.swap);
+  
+  res.json(updatedSwap);
 });
 
 app.post('/swaps/:id/reject', (req, res) => {
@@ -326,6 +358,17 @@ app.post('/swaps/:id/cancel', (req, res) => {
   if (result.error) return res.status(404).json({ error: result.error });
   res.json(result.swap);
 });
+
+// ========== AUTH MIDDLEWARE (placeholder for token-based auth) ==========
+// TODO: Replace with real JWT validation once auth system is implemented
+function getCurrentUserFromRequest(req) {
+  // Placeholder: eventually this will extract user from JWT token
+  // For now, we read from client-sent header or body for backward compatibility
+  const userId = req.headers['x-user-id'] || req.body?._userId;
+  if (!userId) return null;
+  const db = readDb();
+  return db.users.find(u => u.id === userId);
+}
 
 // ========== USER PROFILE ENDPOINTS ==========
 // Get user profile with extended info
@@ -348,14 +391,16 @@ app.patch('/users/:id', (req, res) => {
   if (idx === -1) return res.status(404).json({ error: 'not found' });
   
   const updates = req.body || {};
-  const currentUserRole = updates._currentUserRole;
-  
-  // For authorization check - remove this helper field from updates
+  // Remove client-side authorization hint; use server-side role check instead
+  const requestingUser = getCurrentUserFromRequest(req) || db.users.find(u => u.id === req.params.id);
   delete updates._currentUserRole;
+  delete updates._userId;
   
-  // Check authorization for sensitive fields
-  if (updates.hourlyRate && currentUserRole !== 'Pracodawca') {
-    return res.status(403).json({ error: 'Only employers can modify hourly rates' });
+  // Check authorization for sensitive fields (only employers can modify hourly rates of others)
+  if (updates.hourlyRate && req.params.id !== requestingUser?.id) {
+    if (requestingUser?.role !== 'Pracodawca') {
+      return res.status(403).json({ error: 'Only employers can modify employee rates' });
+    }
   }
   
   // Whitelist fields that can be updated
@@ -520,7 +565,7 @@ app.post('/employer/employees/:userId/rate', (req, res) => {
   });
 });
 
-app.listen(PORT, '0.0.0.0', () => {
+app.listen(PORT, HOST, () => {
   ensureSeed();
-  console.log(`WorkTime backend listening on http://0.0.0.0:${PORT}`);
+  console.log(`WorkTime backend listening on http://${HOST}:${PORT}`);
 });

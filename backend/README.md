@@ -12,6 +12,18 @@ npm start
 ```
 Domyślny port: `http://localhost:4000`.
 
+### Konfiguracja `.env`
+
+Serwer odczytuje zmienne środowiskowe z pliku `.env` w katalogu `backend/` (za pomocą [dotenv](https://www.npmjs.com/package/dotenv)).
+Na start skopiuj `backend/.env.example` do `backend/.env` i dostosuj wartości.
+
+```
+PORT=8000
+HOST=0.0.0.0
+```
+
+Jeśli aplikacja mobilna ma korzystać z innego adresu/portu, ustaw je tutaj, a następnie ustaw odpowiadające wartości `EXPO_PUBLIC_BACKEND_HOST/PORT` w pliku `.env` frontendu.
+
 ## Endpoints (bez zabezpieczeń)
 - `GET /health` → `{ ok: true }`
 - `GET /company` → `{ name }` (pojedyncza firma)

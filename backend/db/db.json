@@ -1,6 +1,6 @@
 {
   "meta": {
-    "seededAt": 1763536576337
+    "seededAt": 1764716451038
   },
   "company": {
     "name": "WorkTime"
@@ -27,7 +27,7 @@
       "role": "Kelner",
       "phone": "+48987654321",
       "avatar": null,
-      "hourlyRate": 32,
+      "hourlyRate": 30.5,
       "preferences": {
         "notificationsEnabled": true,
         "remindersEnabled": true,
@@ -121,32 +121,26 @@
   ],
   "shifts": [
     {
-      "id": "1",
-      "date": "2025-11-18T23:00:00.000Z",
-      "start": "14:00",
-      "end": "22:00",
-      "role": "Barista",
-      "location": "Kawiarnia A"
-    },
-    {
       "id": "2",
-      "date": "2025-11-19T23:00:00.000Z",
+      "date": "2025-12-03T23:00:00.000Z",
       "start": "10:00",
       "end": "16:00",
       "role": "Barista",
-      "location": "Kawiarnia A"
+      "location": "Kawiarnia A",
+      "assignedUserId": "4"
     },
     {
       "id": "3",
-      "date": "2025-11-20T23:00:00.000Z",
+      "date": "2025-12-04T23:00:00.000Z",
       "start": "14:00",
       "end": "22:00",
       "role": "Barista",
-      "location": "Kawiarnia A"
+      "location": "Kawiarnia A",
+      "assignedUserId": "1"
     },
     {
       "id": "4",
-      "date": "2025-11-23T23:00:00.000Z",
+      "date": "2025-12-07T23:00:00.000Z",
       "start": "12:00",
       "end": "18:00",
       "role": "Kelner",
@@ -154,15 +148,16 @@
     },
     {
       "id": "5",
-      "date": "2025-11-24T23:00:00.000Z",
+      "date": "2025-12-08T23:00:00.000Z",
       "start": "08:00",
       "end": "16:00",
       "role": "Kelner",
-      "location": "Restauracja Centralna"
+      "location": "Restauracja Centralna",
+      "assignedUserId": "2"
     },
     {
       "id": "6",
-      "date": "2025-11-25T23:00:00.000Z",
+      "date": "2025-12-09T23:00:00.000Z",
       "start": "12:00",
       "end": "18:00",
       "role": "Kelner",
@@ -170,7 +165,7 @@
     },
     {
       "id": "7",
-      "date": "2025-11-26T23:00:00.000Z",
+      "date": "2025-12-10T23:00:00.000Z",
       "start": "08:00",
       "end": "16:00",
       "role": "Kelner",
@@ -178,7 +173,7 @@
     },
     {
       "id": "8",
-      "date": "2025-11-27T23:00:00.000Z",
+      "date": "2025-12-11T23:00:00.000Z",
       "start": "12:00",
       "end": "18:00",
       "role": "Kelner",
@@ -186,7 +181,7 @@
     },
     {
       "id": "9",
-      "date": "2025-11-28T23:00:00.000Z",
+      "date": "2025-12-12T23:00:00.000Z",
       "start": "08:00",
       "end": "16:00",
       "role": "Kelner",
@@ -194,7 +189,7 @@
     },
     {
       "id": "10",
-      "date": "2025-11-30T23:00:00.000Z",
+      "date": "2025-12-14T23:00:00.000Z",
       "start": "10:00",
       "end": "18:00",
       "role": "Barista",
@@ -202,7 +197,7 @@
     },
     {
       "id": "11",
-      "date": "2025-12-01T23:00:00.000Z",
+      "date": "2025-12-15T23:00:00.000Z",
       "start": "14:00",
       "end": "20:00",
       "role": "Barista",
@@ -210,7 +205,7 @@
     },
     {
       "id": "12",
-      "date": "2025-12-02T23:00:00.000Z",
+      "date": "2025-12-16T23:00:00.000Z",
       "start": "10:00",
       "end": "18:00",
       "role": "Barista",
@@ -218,7 +213,7 @@
     },
     {
       "id": "13",
-      "date": "2025-12-03T23:00:00.000Z",
+      "date": "2025-12-17T23:00:00.000Z",
       "start": "14:00",
       "end": "20:00",
       "role": "Barista",
@@ -226,7 +221,7 @@
     },
     {
       "id": "14",
-      "date": "2025-12-04T23:00:00.000Z",
+      "date": "2025-12-18T23:00:00.000Z",
       "start": "10:00",
       "end": "18:00",
       "role": "Barista",
@@ -234,7 +229,7 @@
     },
     {
       "id": "15",
-      "date": "2025-12-07T23:00:00.000Z",
+      "date": "2025-12-21T23:00:00.000Z",
       "start": "08:00",
       "end": "14:00",
       "role": "Kelner",
@@ -242,7 +237,7 @@
     },
     {
       "id": "16",
-      "date": "2025-12-08T23:00:00.000Z",
+      "date": "2025-12-22T23:00:00.000Z",
       "start": "12:00",
       "end": "20:00",
       "role": "Kelner",
@@ -250,7 +245,7 @@
     },
     {
       "id": "17",
-      "date": "2025-12-09T23:00:00.000Z",
+      "date": "2025-12-23T23:00:00.000Z",
       "start": "08:00",
       "end": "14:00",
       "role": "Kelner",
@@ -258,7 +253,7 @@
     },
     {
       "id": "18",
-      "date": "2025-12-10T23:00:00.000Z",
+      "date": "2025-12-24T23:00:00.000Z",
       "start": "12:00",
       "end": "20:00",
       "role": "Kelner",
@@ -266,7 +261,7 @@
     },
     {
       "id": "19",
-      "date": "2025-12-11T23:00:00.000Z",
+      "date": "2025-12-25T23:00:00.000Z",
       "start": "08:00",
       "end": "14:00",
       "role": "Kelner",
@@ -274,7 +269,7 @@
     },
     {
       "id": "20",
-      "date": "2025-12-12T23:00:00.000Z",
+      "date": "2025-12-26T23:00:00.000Z",
       "start": "12:00",
       "end": "20:00",
       "role": "Kelner",
@@ -282,7 +277,7 @@
     },
     {
       "id": "21",
-      "date": "2025-12-14T23:00:00.000Z",
+      "date": "2025-12-28T23:00:00.000Z",
       "start": "14:00",
       "end": "22:00",
       "role": "Barista",
@@ -290,22 +285,11 @@
     },
     {
       "id": "22",
-      "date": "2025-12-15T23:00:00.000Z",
+      "date": "2025-12-29T23:00:00.000Z",
       "start": "10:00",
       "end": "16:00",
       "role": "Barista",
       "location": "Kawiarnia A"
-    },
-    {
-      "id": "23",
-      "date": "2025-11-19T07:47:16.785Z",
-      "start": "09:00",
-      "end": "16:00",
-      "role": "Kelner",
-      "location": "Lokal główny",
-      "assignedUserId": "4",
-      "createdAt": "2025-11-19T07:48:08.253Z",
-      "updatedAt": "2025-11-19T07:48:08.253Z"
     }
   ],
   "availabilities": [
@@ -395,18 +379,18 @@
       "shiftId": "5",
       "requesterId": "2",
       "targetUserId": "1",
-      "status": "accepted",
+      "status": "rejected",
       "createdAt": "2025-11-04T09:30:00.000Z",
-      "updatedAt": "2025-11-17T19:56:08.797Z"
+      "updatedAt": "2025-12-03T08:30:19.406Z"
     },
     {
       "id": "swap3",
       "shiftId": "1",
       "requesterId": "1",
       "targetUserId": null,
-      "status": "accepted",
+      "status": "rejected",
       "createdAt": "2025-11-03T15:00:00.000Z",
-      "updatedAt": "2025-11-17T19:56:09.611Z"
+      "updatedAt": "2025-12-03T08:30:21.918Z"
     },
     {
       "id": "4",
@@ -441,22 +425,22 @@
       "id": "ts1",
       "userId": "1",
       "shiftId": "1",
-      "clockInTime": "2025-11-03T12:05:00.000Z",
-      "clockOutTime": "2025-11-03T20:15:00.000Z"
+      "clockIn": "2025-11-03T12:05:00.000Z",
+      "clockOut": "2025-11-03T20:15:00.000Z"
     },
     {
       "id": "ts2",
       "userId": "1",
       "shiftId": "2",
-      "clockInTime": "2025-11-04T08:10:00.000Z",
-      "clockOutTime": "2025-11-04T14:05:00.000Z"
+      "clockIn": "2025-11-04T08:10:00.000Z",
+      "clockOut": "2025-11-04T14:05:00.000Z"
     },
     {
       "id": "ts3",
       "userId": "2",
       "shiftId": "1",
-      "clockInTime": "2025-11-03T12:00:00.000Z",
-      "clockOutTime": "2025-11-03T20:00:00.000Z"
+      "clockIn": "2025-11-03T12:00:00.000Z",
+      "clockOut": "2025-11-03T20:00:00.000Z"
     },
     {
       "id": "4",
@@ -506,6 +490,41 @@
       "shiftId": "1",
       "clockIn": "2025-11-19T07:45:48.031Z",
       "clockOut": "2025-11-19T07:45:53.513Z"
+    },
+    {
+      "id": "11",
+      "userId": "8",
+      "shiftId": "1",
+      "clockIn": "2025-12-02T23:02:59.636Z",
+      "clockOut": "2025-12-02T23:03:06.651Z"
+    },
+    {
+      "id": "12",
+      "userId": "8",
+      "shiftId": "1",
+      "clockIn": "2025-12-02T23:04:46.503Z",
+      "clockOut": "2025-12-02T23:04:53.609Z"
+    },
+    {
+      "id": "13",
+      "userId": "8",
+      "shiftId": "1",
+      "clockIn": "2025-12-03T07:32:31.514Z",
+      "clockOut": "2025-12-03T07:32:35.005Z"
+    },
+    {
+      "id": "14",
+      "userId": "8",
+      "shiftId": "1",
+      "clockIn": "2025-12-03T07:36:36.297Z",
+      "clockOut": "2025-12-03T07:36:46.029Z"
+    },
+    {
+      "id": "15",
+      "userId": "8",
+      "shiftId": "1",
+      "clockIn": "2025-12-03T07:37:09.177Z",
+      "clockOut": "2025-12-03T07:37:13.945Z"
     }
   ]
 }

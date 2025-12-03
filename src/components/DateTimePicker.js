@@ -14,16 +14,13 @@ export default function DateTimePicker({
   const [show, setShow] = useState(false);
 
   const handleChange = (event, selectedValue) => {
-    setShow(Platform.OS === 'ios'); // Only iOS keeps the picker open
-    
-    // Na Androidzie event.type nie istnieje, ale otrzymujemy selectedValue
-    // Na iOS sprawdzamy event.type === 'set'
+    // On iOS with inline display, the picker stays open until user confirms
+    // On Android, it closes automatically
     if (Platform.OS === 'android') {
-      if (selectedValue) {
-        onChange(selectedValue);
-      }
-    } else if (event.type === 'set' && selectedValue) {
-      onChange(selectedValue);
+      setShow(false);
+    }
+    if (selectedValue) {
+      onChange(event, selectedValue);
     }
   };
 
@@ -65,10 +62,19 @@ export default function DateTimePicker({
           value={value instanceof Date ? value : new Date()}
           mode={mode}
           onChange={handleChange}
-          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+          display={Platform.OS === 'ios' ? 'inline' : 'default'}
           is24Hour={true}
           minimumDate={mode === 'date' ? new Date() : undefined}
         />
+      )}
+      
+      {show && Platform.OS === 'ios' && (
+        <TouchableOpacity 
+          onPress={() => setShow(false)}
+          style={styles.closeButton}
+        >
+          <Text style={styles.closeButtonText}>Gotowe</Text>
+        </TouchableOpacity>
       )}
     </View>
   );
@@ -93,5 +99,18 @@ const styles = StyleSheet.create({
   },
   placeholder: {
     color: colors.muted,
+  },
+  closeButton: {
+    marginTop: spacing.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
+    alignItems: 'center',
+  },
+  closeButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
