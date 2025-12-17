@@ -17,60 +17,20 @@ function writeDb(db) {
   fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2), 'utf8');
 }
 
-function pad(n) { return String(n).padStart(2, '0'); }
-function addDays(d, n) { const x = new Date(d); x.setDate(d.getDate() + n); x.setHours(0,0,0,0); return x; }
-function addMinutesToHHMM(hhmm, minutes) {
-  const [h, m] = hhmm.split(':').map((x) => parseInt(x, 10));
-  const total = h * 60 + m + minutes;
-  const hh = Math.floor(total / 60) % 24;
-  const mm = total % 60;
-  return `${pad(hh)}:${pad(mm)}`;
-}
-
-function ensureSeed() {
+function findOrCreateUser(username) {
   const db = readDb();
-  // Only seed if DB is completely empty (first run) — preserve manual shifts after creation
-  if (!db.shifts || db.shifts.length === 0) {
-    const start = addDays(new Date(), 0);
-    const roles = ['Kelner', 'Barista'];
-    const locations = ['Restauracja Centralna', 'Kawiarnia A'];
-    const startOptions = ['08:00', '10:00', '12:00', '14:00'];
-    const durationOptions = [6 * 60, 8 * 60];
-    const newShifts = [];
-    let idCounter = 1;
-    for (let i = 0; i < 28; i++) {
-      const date = addDays(start, i);
-      const dow = date.getDay();
-      const isWorkDay = (dow >= 1 && dow <= 5) || (dow === 6 && i % 2 === 0);
-      if (!isWorkDay) continue;
-      const startStr = startOptions[(i + dow) % startOptions.length];
-      const dur = durationOptions[(i + 1) % durationOptions.length];
-      const endStr = addMinutesToHHMM(startStr, dur);
-      const role = roles[(i + dow) % roles.length];
-      const location = locations[(i * 3 + dow) % locations.length];
-      newShifts.push({ id: String(idCounter++), date: date.toISOString(), start: startStr, end: endStr, role, location });
-    }
-    db.shifts = newShifts;
-    db.meta = db.meta || {};
-    db.meta.seededAt = Date.now();
-    writeDb(db);
-    console.log(`[Seed] Generated ${newShifts.length} initial shifts on first run.`);
-  }
-}
-
-function findOrCreateUser(email) {
-  const db = readDb();
-  let user = db.users.find(u => u.email === email);
+  let user = db.users.find(u => u.username === username);
   if (!user) {
     const id = String(db.users.length + 1);
     user = {
       id,
-      email,
-      name: email.split('@')[0],
-      role: 'Kelner',
+      username,
+      name: username,
+      isEmployer: false, // domyślnie pracownik
       phone: '',
       avatar: null,
       hourlyRate: 30.5, // Minimum 30.5 zł/h default
+      positions: [], // Brak przypisanych stanowisk domyślnie
       preferences: {
         notificationsEnabled: true,
         remindersEnabled: true,
@@ -85,7 +45,7 @@ function findOrCreateUser(email) {
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' })); // Increase limit for base64 images
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 
@@ -108,10 +68,23 @@ app.get('/company', (req, res) => {
   res.json(db.company || { name: 'WorkTime' });
 });
 
+// Get restaurant location
+app.get('/company/location', (req, res) => {
+  const db = readDb();
+  const location = db.company?.location || {
+    latitude: 52.2297,
+    longitude: 21.0122,
+    radius: 100,
+    address: 'Warszawa, Polska',
+    name: 'Główna restauracja',
+  };
+  res.json(location);
+});
+
 app.post('/login', (req, res) => {
-  const { email } = req.body || {};
-  if (!email) return res.status(400).json({ error: 'email required' });
-  const user = findOrCreateUser(email);
+  const { username } = req.body || {};
+  if (!username) return res.status(400).json({ error: 'username required' });
+  const user = findOrCreateUser(username);
   res.json(user);
 });
 
@@ -129,7 +102,6 @@ app.get('/users', (req, res) => {
 });
 
 app.get('/shifts', (req, res) => {
-  ensureSeed();
   const db = readDb();
   const { from, to, assignedUserId, role } = req.query;
   let list = db.shifts.map(s => ({ ...s, date: s.date }));
@@ -214,14 +186,21 @@ app.get('/timesheets', (req, res) => {
 });
 
 app.post('/timesheets/clock-in', (req, res) => {
-  const { userId, timestamp, shiftId } = req.body || {};
+  const { userId, timestamp, shiftId, location } = req.body || {};
   if (!userId) return res.status(400).json({ error: 'userId required' });
   const db = readDb();
   const active = db.timesheets.find(t => t.userId === userId && !t.clockOut);
   if (active) return res.status(400).json({ error: 'already clocked in' });
   const id = String(db.timesheets.length + 1);
   const nowIso = new Date(timestamp || Date.now()).toISOString();
-  const entry = { id, userId, shiftId: shiftId || null, clockIn: nowIso, clockOut: null };
+  const entry = {
+    id,
+    userId,
+    shiftId: shiftId || null,
+    clockIn: nowIso,
+    clockOut: null,
+    checkInLocation: location || null, // Store check-in location
+  };
   db.timesheets.push(entry);
   writeDb(db);
   res.json(entry);
@@ -380,6 +359,8 @@ app.get('/users/:id/profile', (req, res) => {
     ...user,
     phone: user.phone || '',
     avatar: user.avatar || null,
+    photoUri: user.photoUri || null,
+    photoBase64: user.photoBase64 || null,
     preferences: user.preferences || {},
   });
 });
@@ -404,7 +385,7 @@ app.patch('/users/:id', (req, res) => {
   }
   
   // Whitelist fields that can be updated
-  const allowed = ['name', 'phone', 'avatar', 'preferences', 'role', 'hourlyRate'];
+  const allowed = ['name', 'phone', 'avatar', 'photoUri', 'photoBase64', 'preferences', 'role', 'hourlyRate'];
   for (const field of allowed) {
     if (field in updates) {
       // Validate hourlyRate minimum 30.5 zł/h
@@ -534,6 +515,68 @@ app.get('/context/:userId', (req, res) => {
   });
 });
 
+// ========== POSITIONS ENDPOINTS ==========
+// Get all positions
+app.get('/positions', (req, res) => {
+  const db = readDb();
+  const activeOnly = req.query.active === 'true';
+  let positions = db.positions || [];
+  if (activeOnly) {
+    positions = positions.filter(p => p.active);
+  }
+  res.json(positions);
+});
+
+// Get position by ID
+app.get('/positions/:id', (req, res) => {
+  const db = readDb();
+  const position = (db.positions || []).find(p => p.id === req.params.id);
+  if (!position) return res.status(404).json({ error: 'position not found' });
+  res.json(position);
+});
+
+// Assign positions to user
+app.post('/users/:userId/positions', (req, res) => {
+  const { positionIds } = req.body || {};
+  if (!Array.isArray(positionIds)) {
+    return res.status(400).json({ error: 'positionIds array required' });
+  }
+
+  const db = readDb();
+  const user = db.users.find(u => u.id === req.params.userId);
+  if (!user) return res.status(404).json({ error: 'user not found' });
+
+  // Validate all position IDs exist
+  const validIds = positionIds.filter(id => 
+    (db.positions || []).some(p => p.id === id)
+  );
+
+  user.positions = validIds;
+  writeDb(db);
+  res.json(user);
+});
+
+// Remove position from user
+app.delete('/users/:userId/positions/:positionId', (req, res) => {
+  const db = readDb();
+  const user = db.users.find(u => u.id === req.params.userId);
+  if (!user) return res.status(404).json({ error: 'user not found' });
+
+  user.positions = (user.positions || []).filter(p => p !== req.params.positionId);
+  writeDb(db);
+  res.json(user);
+});
+
+// Get all employees with specific position
+app.get('/positions/:positionId/employees', (req, res) => {
+  const db = readDb();
+  const employees = db.users.filter(u => 
+    !u.isEmployer && 
+    (u.positions || []).includes(req.params.positionId)
+  );
+  res.json(employees);
+});
+
 // ========== EMPLOYER ENDPOINTS (set hourly rates for employees) ==========
 // Set employee hourly rate (employer only)
 app.post('/employer/employees/:userId/rate', (req, res) => {
@@ -566,6 +609,5 @@ app.post('/employer/employees/:userId/rate', (req, res) => {
 });
 
 app.listen(PORT, HOST, () => {
-  ensureSeed();
   console.log(`WorkTime backend listening on http://${HOST}:${PORT}`);
 });

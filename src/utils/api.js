@@ -2,18 +2,21 @@ import { Platform } from 'react-native';
 
 let cachedBaseUrl = null;
 
-function getBaseUrl() {
+export function getBaseUrl() {
   // Cache the URL to avoid repeated calls
   if (cachedBaseUrl) return cachedBaseUrl;
 
   // Use environment variable for backend host, or default to localhost
   const backendHost = process.env.EXPO_PUBLIC_BACKEND_HOST || 'localhost';
-  const backendPort = process.env.EXPO_PUBLIC_BACKEND_PORT || 4000;
+  const backendPort = process.env.EXPO_PUBLIC_BACKEND_PORT || 8000;
 
   cachedBaseUrl = `http://${backendHost}:${backendPort}`;
   console.log('Backend URL:', cachedBaseUrl);
   return cachedBaseUrl;
 }
+
+// Export for use in other modules like location.js
+export const API_BASE_URL = getBaseUrl();
 
 async function http(path, { method = 'GET', body } = {}) {
   const baseUrl = getBaseUrl();
@@ -56,8 +59,8 @@ async function http(path, { method = 'GET', body } = {}) {
   }
 }
 
-export async function apiLogin(email) {
-  return http('/login', { method: 'POST', body: { email } });
+export async function apiLogin(username) {
+  return http('/login', { method: 'POST', body: { username } });
 }
 
 export async function apiGetShifts({ from, to, assignedUserId } = {}) {
@@ -70,8 +73,11 @@ export async function apiGetShifts({ from, to, assignedUserId } = {}) {
   return data.map((s) => ({ ...s, date: new Date(s.date) }));
 }
 
-export async function apiClockIn({ userId, shiftId, timestamp }) {
-  return http('/timesheets/clock-in', { method: 'POST', body: { userId, shiftId, timestamp } });
+export async function apiClockIn({ userId, shiftId, timestamp, location }) {
+  return http('/timesheets/clock-in', {
+    method: 'POST',
+    body: { userId, shiftId, timestamp, location },
+  });
 }
 
 export async function apiClockOut({ userId, timestamp }) {
@@ -169,6 +175,17 @@ export async function apiUpdateUserProfile(userId, updates) {
   return http(`/users/${userId}`, { method: 'PATCH', body: updates });
 }
 
+// Upload user profile photo (base64)
+export async function apiUploadProfilePhoto(userId, photoBase64, fileName = 'profile.jpg') {
+  return http(`/users/${userId}`, {
+    method: 'PATCH',
+    body: {
+      photoBase64,
+      photoFileName: fileName,
+    },
+  });
+}
+
 // Extended availability functions
 export async function apiUpdateAvailability(id, updates) {
   return http(`/availabilities/${id}`, { method: 'PATCH', body: updates });
@@ -194,4 +211,30 @@ export async function apiSetEmployeeHourlyRate(employerId, userId, hourlyRate) {
     method: 'POST',
     body: { employerId, hourlyRate },
   });
+}
+// Positions endpoints
+export async function apiGetPositions(activeOnly = true) {
+  const params = activeOnly ? '?active=true' : '';
+  return http(`/positions${params}`);
+}
+
+export async function apiGetPosition(positionId) {
+  return http(`/positions/${positionId}`);
+}
+
+export async function apiAssignPositions(userId, positionIds) {
+  return http(`/users/${userId}/positions`, {
+    method: 'POST',
+    body: { positionIds },
+  });
+}
+
+export async function apiRemovePosition(userId, positionId) {
+  return http(`/users/${userId}/positions/${positionId}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function apiGetEmployeesByPosition(positionId) {
+  return http(`/positions/${positionId}/employees`);
 }

@@ -1,16 +1,23 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Modal, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Modal, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { colors, spacing, radius } from '../utils/theme';
 import Screen from '../components/Screen';
 import Card from '../components/Card';
 import SectionHeader from '../components/SectionHeader';
 import ProgressBar from '../components/ProgressBar';
 import Badge from '../components/Badge';
+import Toast from '../components/Toast';
+import { LocationCheckModal } from '../components/LocationCheckModal';
 import { Ionicons } from '@expo/vector-icons';
 import { formatTimeRange, minutesToHhMm } from '../utils/format';
 import { apiGetShifts, apiClockIn, apiClockOut, apiGetTimesheets } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  requestLocationPermissions,
+  getCurrentLocation,
+  isWithinRestaurant,
+} from '../utils/location';
 
 export default function HomeScreen() {
   const { user } = useAuth();
@@ -87,7 +94,11 @@ export default function HomeScreen() {
   }, [shifts, timesheets, todayStr]);
 
   const [activeStart, setActiveStart] = React.useState(null); // Date | null
-  const [tick, setTick] = React.useState(0); // force re-render each second when needed
+  const [currentTime, setCurrentTime] = React.useState(new Date()); // Current time for timer updates
+  const [isCheckingLocation, setIsCheckingLocation] = React.useState(false);
+  const [locationToast, setLocationToast] = React.useState(null);
+  const [locationCheckStep, setLocationCheckStep] = React.useState('permissions'); // Tracking which step
+  const [locationCheckError, setLocationCheckError] = React.useState(null);
 
   React.useEffect(() => {
     (async () => {
@@ -99,23 +110,106 @@ export default function HomeScreen() {
   }, []);
 
   React.useEffect(() => {
-    // Run timer when counting down to next shift or when clocked in
-    if (!nextShift) return;
-    const startDate = parseShiftTime(nextShift.date, nextShift.start);
-    const needsTick = activeStart || (startDate.getTime() > Date.now());
-    if (!needsTick) return;
-    const id = setInterval(() => setTick((x) => x + 1), 1000);
-    return () => clearInterval(id);
-  }, [activeStart, nextShift]);
+    // Update current time every second to refresh timer
+    const interval = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   const isClockedIn = !!activeStart;
 
   const handleClockIn = async () => {
-    const now = Date.now();
-    setActiveStart(new Date(now));
-    await AsyncStorage.setItem('WTM_ACTIVE_SHIFT_START', String(now));
-    if (user?.id) {
-      try { await apiClockIn({ userId: user.id, shiftId: nextShift?.id, timestamp: now }); } catch {}
+    try {
+      setIsCheckingLocation(true);
+      setLocationCheckStep('permissions');
+      setLocationCheckError(null);
+      
+      // Step 1: Request location permissions
+      try {
+        await requestLocationPermissions();
+        await new Promise(resolve => setTimeout(resolve, 600)); // Artificial delay
+        setLocationCheckStep('userLocation');
+      } catch (err) {
+        setLocationCheckError(err.message);
+        await new Promise(resolve => setTimeout(resolve, 1500)); // Show error
+        return;
+      }
+
+      // Step 2: Get current location
+      let userLocation;
+      try {
+        userLocation = await getCurrentLocation();
+        await new Promise(resolve => setTimeout(resolve, 800)); // Artificial delay
+        setLocationCheckStep('restaurantLocation');
+      } catch (err) {
+        setLocationCheckError('Nie udało się pobrać Twojej lokalizacji');
+        await new Promise(resolve => setTimeout(resolve, 1500)); // Show error
+        return;
+      }
+
+      // Step 3: Load restaurant location
+      await new Promise(resolve => setTimeout(resolve, 700)); // Artificial delay
+      setLocationCheckStep('calculating');
+      
+      // Step 4: Check if user is within restaurant
+      let locationCheck;
+      try {
+        locationCheck = await isWithinRestaurant(userLocation);
+        await new Promise(resolve => setTimeout(resolve, 600)); // Artificial delay
+        setLocationCheckStep('verification');
+      } catch (err) {
+        setLocationCheckError('Błąd porównania lokalizacji');
+        await new Promise(resolve => setTimeout(resolve, 1500)); // Show error
+        return;
+      }
+
+      // Add delay to show verification step
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      if (!locationCheck.isWithin) {
+        setIsCheckingLocation(false);
+        Alert.alert(
+          'Poza restauracją',
+          `Jesteś ${locationCheck.distance}m od restauracji. Podejdź bliżej (dozwolony promień: ${locationCheck.radius}m).`,
+          [{ text: 'OK' }]
+        );
+        setLocationToast({
+          message: `❌ Lokalizacja: ${locationCheck.distance}m od restauracji`,
+          type: 'danger',
+        });
+        return;
+      }
+
+      setLocationToast({
+        message: `✓ Lokalizacja potwierdzona (${locationCheck.distance}m)`,
+        type: 'success',
+      });
+
+      const now = Date.now();
+      setActiveStart(new Date(now));
+      await AsyncStorage.setItem('WTM_ACTIVE_SHIFT_START', String(now));
+      if (user?.id) {
+        try {
+          await apiClockIn({
+            userId: user.id,
+            shiftId: nextShift?.id,
+            timestamp: now,
+            location: {
+              latitude: userLocation.latitude,
+              longitude: userLocation.longitude,
+              accuracy: userLocation.accuracy,
+            },
+          });
+        } catch (err) {
+          console.error('Clock in error:', err);
+        }
+      }
+    } catch (error) {
+      setLocationCheckError(error.message || 'Nie udało się pobrać lokalizacji');
+      console.error('Clock in error:', error);
+    } finally {
+      setIsCheckingLocation(false);
     }
   };
 
@@ -130,7 +224,7 @@ export default function HomeScreen() {
 
   const startDate = nextShift ? parseShiftTime(nextShift.date, nextShift.start) : null;
   const endDate = nextShift ? parseShiftTime(nextShift.date, nextShift.end) : null;
-  const now = new Date();
+  const now = currentTime; // Use updated currentTime from state
   const beforeStart = startDate ? now < startDate : false;
   const duringShift = startDate && endDate ? now >= startDate && now <= endDate : false;
 
@@ -139,6 +233,20 @@ export default function HomeScreen() {
 
   return (
     <Screen>
+      {/* Location Check Modal */}
+      <LocationCheckModal
+        visible={isCheckingLocation}
+        currentStep={locationCheckStep}
+        error={locationCheckError}
+      />
+
+      {locationToast && (
+        <Toast
+          message={locationToast.message}
+          type={locationToast.type}
+          onDismiss={() => setLocationToast(null)}
+        />
+      )}
       <Text style={styles.greeting}>Cześć, {user?.name?.split(' ')[0] || 'Użytkowniku'}</Text>
 
       <SectionHeader title={todaysShift ? 'Dzisiejsza zmiana' : 'Najbliższa zmiana'} />
@@ -177,17 +285,29 @@ export default function HomeScreen() {
 
         <View style={styles.actions}>
           <TouchableOpacity
-            style={[styles.button, styles.inButton, (isClockedIn ? styles.disabledBtn : null)]}
+            style={[styles.button, styles.inButton, (isClockedIn || isCheckingLocation ? styles.disabledBtn : null)]}
             onPress={handleClockIn}
-            disabled={isClockedIn}
+            disabled={isClockedIn || isCheckingLocation}
+            accessibilityLabel="Rozpocznij rejestrację czasu pracy"
+            accessibilityHint="Wymaga weryfikacji lokalizacji GPS"
           >
-            <Ionicons name="log-in-outline" size={18} color="#fff" style={{ marginRight: 6 }} />
-            <Text style={styles.buttonText}>{isClockedIn ? 'W trakcie' : 'Wejdź do pracy'}</Text>
+            {isCheckingLocation ? (
+              <>
+                <ActivityIndicator size="small" color="#fff" style={{ marginRight: 6 }} />
+                <Text style={styles.buttonText}>Sprawdzam...</Text>
+              </>
+            ) : (
+              <>
+                <Ionicons name="log-in-outline" size={18} color="#fff" style={{ marginRight: 6 }} />
+                <Text style={styles.buttonText}>{isClockedIn ? 'W trakcie' : 'Wejdź do pracy'}</Text>
+              </>
+            )}
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.button, styles.outButton]}
             onPress={handleClockOut}
             disabled={!isClockedIn}
+            accessibilityLabel="Zakończ rejestrację czasu pracy"
           >
             <Ionicons name="log-out-outline" size={18} color={isClockedIn ? colors.primary : '#9AA1AE'} style={{ marginRight: 6 }} />
             <Text style={[styles.buttonText, styles.outText]}>Wyjdź z pracy</Text>
@@ -207,9 +327,21 @@ export default function HomeScreen() {
 
       <SectionHeader title="Szybkie akcje" />
       <View style={styles.quickGrid}>
-        <QuickAction icon="time-outline" label="Spóźnię się" />
-        <QuickAction icon="swap-horizontal-outline" label="Zamiana zmiany" />
-        <QuickAction icon="document-text-outline" label="Zobacz regulamin" />
+        <QuickAction 
+          icon="time-outline" 
+          label="Spóźnię się" 
+          onPress={() => Alert.alert('Spóźnienie', 'Funkcja w przygotowaniu')}
+        />
+        <QuickAction 
+          icon="swap-horizontal-outline" 
+          label="Zamiana zmiany" 
+          onPress={() => Alert.alert('Zamiana', 'Funkcja w przygotowaniu')}
+        />
+        <QuickAction 
+          icon="document-text-outline" 
+          label="Zobacz regulamin" 
+          onPress={() => Alert.alert('Regulamin', 'Funkcja w przygotowaniu')}
+        />
       </View>
 
       {/* Shift Details Modal */}
@@ -271,12 +403,17 @@ export default function HomeScreen() {
   );
 }
 
-function QuickAction({ icon, label }) {
+function QuickAction({ icon, label, onPress, disabled }) {
   return (
-    <View style={styles.qa}>
+    <TouchableOpacity
+      style={[styles.qa, disabled && { opacity: 0.5 }]}
+      onPress={onPress}
+      disabled={disabled}
+      activeOpacity={0.7}
+    >
       <Ionicons name={icon} size={18} color={colors.primary} />
       <Text style={styles.qaText}>{label}</Text>
-    </View>
+    </TouchableOpacity>
   );
 }
 
@@ -292,10 +429,9 @@ function formatCountdown(target, now) {
   const s = Math.floor(diff / 1000);
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
-  const sec = s % 60;
   if (h > 0) return `${h} h ${m} m`;
-  if (m > 0) return `${m} m ${sec} s`;
-  return `${sec} s`;
+  if (m > 0) return `${m} m`;
+  return 'mniej niż minutę';
 }
 
 function formatElapsed(start, now) {

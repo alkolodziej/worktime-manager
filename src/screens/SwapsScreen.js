@@ -104,16 +104,26 @@ export default function SwapsScreen() {
         contentContainerStyle={{ gap: spacing.md, paddingVertical: spacing.md }}
         refreshing={loading}
         onRefresh={load}
+        ListEmptyComponent={
+          !loading && (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyText}>Brak nadchodzących zmian</Text>
+            </View>
+          )
+        }
         renderItem={({ item: shift }) => {
           const assignedUser = users.find(u => u.id === shift.assignedUserId);
           const hasRequest = hasSwapRequest(shift.id);
+          const isMyShift = shift.assignedUserId === user?.id;
+          const dateObj = shift.date instanceof Date ? shift.date : new Date(shift.date);
+          
           return (
             <Card>
               <View style={{ marginBottom: spacing.md }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <View style={{ flex: 1, marginRight: spacing.md }}>
                     <Text style={styles.itemTitle}>
-                      {new Date(shift.date).toLocaleDateString('pl-PL', { weekday: 'short', month: 'short', day: 'numeric' })}
+                      {dateObj.toLocaleDateString('pl-PL', { weekday: 'short', month: 'short', day: 'numeric' })}
                     </Text>
                     <Text style={styles.itemMeta}>{formatTimeRange(shift.start, shift.end)}</Text>
                     <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm }}>
@@ -127,12 +137,14 @@ export default function SwapsScreen() {
                     )}
                   </View>
                   <TouchableOpacity
-                    style={[styles.smallBtn, hasRequest && styles.smallBtnDisabled]}
+                    style={[styles.smallBtn, (hasRequest || isMyShift) && styles.smallBtnDisabled]}
                     onPress={() => requestSwap(shift.id, shift.assignedUserId)}
-                    disabled={hasRequest}
+                    disabled={hasRequest || isMyShift}
                   >
                     {hasRequest ? (
                       <Text style={styles.smallBtnText}>✓ Prośba wysłana</Text>
+                    ) : isMyShift ? (
+                      <Text style={styles.smallBtnText}>Moja zmiana</Text>
                     ) : (
                       <Text style={styles.smallBtnText}>Poproś</Text>
                     )}
@@ -149,6 +161,13 @@ export default function SwapsScreen() {
         data={swaps}
         keyExtractor={(item) => item.id}
         contentContainerStyle={{ gap: spacing.md, paddingVertical: spacing.md }}
+        ListEmptyComponent={
+          !loading && (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyText}>Brak próśb o zamianę</Text>
+            </View>
+          )
+        }
         renderItem={({ item: swap }) => {
           const shift = shifts.find(s => s.id === swap.shiftId);
           const targetUser = users.find(u => u.id === swap.targetUserId);
@@ -162,7 +181,7 @@ export default function SwapsScreen() {
                     {shift && (
                       <>
                         <Text style={styles.itemTitle}>
-                          {new Date(shift.date).toLocaleDateString('pl-PL', { weekday: 'short', month: 'short', day: 'numeric' })}
+                          {(shift.date instanceof Date ? shift.date : new Date(shift.date)).toLocaleDateString('pl-PL', { weekday: 'short', month: 'short', day: 'numeric' })}
                         </Text>
                         <Text style={styles.itemMeta}>{formatTimeRange(shift.start, shift.end)}</Text>
                         <Badge label={prettyStatus(swap.status)} tone={statusBadge} style={{ marginTop: spacing.sm }} />
@@ -222,5 +241,13 @@ const styles = StyleSheet.create({
     color: '#fff', 
     fontWeight: '700',
     fontSize: 12,
+  },
+  emptyState: {
+    paddingVertical: spacing.xl,
+    alignItems: 'center',
+  },
+  emptyText: {
+    fontSize: 14,
+    color: colors.muted,
   },
 });

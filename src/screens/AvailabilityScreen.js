@@ -41,6 +41,13 @@ export default function AvailabilityScreen() {
       showToast('Wypełnij wszystkie pola', 'error');
       return;
     }
+
+    // Validate time range
+    if (startDate >= endDate) {
+      showToast('Godzina końcowa musi być późniejsza niż początkowa', 'error');
+      return;
+    }
+
     try {
       // Formatowanie godzin w formacie HH:mm
       const formatTime = (date) => {
@@ -63,9 +70,15 @@ export default function AvailabilityScreen() {
         end
       });
       
+      // Reset form with default values
       setDate(null);
-      setStartDate(null);
-      setEndDate(null);
+      const defaultStart = new Date();
+      defaultStart.setHours(8, 0, 0, 0);
+      setStartDate(defaultStart);
+      const defaultEnd = new Date();
+      defaultEnd.setHours(16, 0, 0, 0);
+      setEndDate(defaultEnd);
+      
       await load();
       showToast('Dodano dostępność', 'success');
     } catch (error) {
@@ -131,6 +144,14 @@ export default function AvailabilityScreen() {
         contentContainerStyle={{ gap: spacing.md, paddingVertical: spacing.md }}
         refreshing={loading}
         onRefresh={load}
+        ListEmptyComponent={
+          !loading && (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyText}>Brak zgłoszeń dostępności</Text>
+              <Text style={styles.emptyHint}>Dodaj swoją dostępność powyżej</Text>
+            </View>
+          )
+        }
         renderItem={({ item }) => (
           <Card>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -165,6 +186,20 @@ const styles = StyleSheet.create({
   button: {
     marginTop: spacing.md,
     backgroundColor: colors.primary,
+  emptyState: {
+    paddingVertical: spacing.xl,
+    alignItems: 'center',
+  },
+  emptyText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  emptyHint: {
+    marginTop: spacing.sm,
+    fontSize: 12,
+    color: colors.muted,
+  },
     borderRadius: radius.md,
     paddingVertical: spacing.md,
     alignItems: 'center',

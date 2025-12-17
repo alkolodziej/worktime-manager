@@ -27,14 +27,15 @@ export function AuthProvider({ children }) {
     })();
   }, []);
 
-  const login = async ({ email, avatarUri, roleOverride }) => {
+  const login = async ({ username, avatarUri, viewMode }) => {
     try {
-      const backendUser = await apiLogin(email);
+      const backendUser = await apiLogin(username);
       const nextUser = {
         id: backendUser.id,
-        email: backendUser.email,
+        username: backendUser.username,
         name: backendUser.name,
-        role: roleOverride || backendUser.role,
+        isEmployer: backendUser.isEmployer, // Rola z backendu
+        viewMode: viewMode || (backendUser.isEmployer ? 'employer' : 'employee'), // Tryb widoku
         avatarUri: avatarUri || null,
       };
       setUser(nextUser);
@@ -44,10 +45,11 @@ export function AuthProvider({ children }) {
       // Fallback to local-only session if backend unavailable
       // This allows offline mode: user can still use app with local data
       const nextUser = { 
-        id: email, // Use email as temp ID when offline
-        email, 
-        name: email.split('@')[0], 
-        role: roleOverride || 'Kelner', 
+        id: username, // Use username as temp ID when offline
+        username, 
+        name: username, 
+        isEmployer: false,
+        viewMode: viewMode || 'employee',
         avatarUri: avatarUri || null,
         isOffline: true, // Flag to indicate offline session
       };
@@ -62,7 +64,7 @@ export function AuthProvider({ children }) {
   };
 
   const updatePhoto = async (uri) => {
-    const nextUser = user ? { ...user, avatarUri: uri } : { email: '', avatarUri: uri };
+    const nextUser = user ? { ...user, avatarUri: uri } : { username: '', avatarUri: uri };
     setUser(nextUser);
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(nextUser));
   };

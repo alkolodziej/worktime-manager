@@ -7,15 +7,19 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function LoginScreen() {
   const { login } = useAuth();
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [modeEmployer, setModeEmployer] = useState(false); // subtle mode toggle
 
   const onSubmit = async () => {
-    if (!email.trim()) {
-      setError('Podaj e-mail');
+    if (!username.trim()) {
+      setError('Podaj nazwę użytkownika');
+      return;
+    }
+    if (!password.trim()) {
+      setError('Podaj hasło');
       return;
     }
     if (password.length < 4) {
@@ -23,17 +27,17 @@ export default function LoginScreen() {
       return;
     }
     setError('');
-    await login({ email, roleOverride: modeEmployer ? 'Pracodawca' : undefined });
-    try { await AsyncStorage.setItem('WTM_LAST_EMAIL', email.trim()); } catch {}
+    await login({ username, viewMode: modeEmployer ? 'employer' : 'employee' });
+    try { await AsyncStorage.setItem('WTM_LAST_USERNAME', username.trim()); } catch {}
   };
 
-  const valid = email.trim().length > 0 && password.length >= 4;
+  const valid = username.trim().length > 0 && password.length >= 4;
 
   useEffect(() => {
     (async () => {
       try {
-        const last = await AsyncStorage.getItem('WTM_LAST_EMAIL');
-        if (last) setEmail(last);
+        const last = await AsyncStorage.getItem('WTM_LAST_USERNAME');
+        if (last) setUsername(last);
       } catch {}
     })();
   }, []);
@@ -46,13 +50,12 @@ export default function LoginScreen() {
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.label}>E-mail</Text>
+        <Text style={styles.label}>Nazwa użytkownika</Text>
         <TextInput
-          value={email}
-          onChangeText={setEmail}
-          placeholder="jan.kowalski@example.com"
+          value={username}
+          onChangeText={setUsername}
+          placeholder="jan.kowalski"
           autoCapitalize="none"
-          keyboardType="email-address"
           style={styles.input}
           placeholderTextColor={colors.muted}
         />
@@ -152,8 +155,9 @@ const styles = StyleSheet.create({
   reveal: {
     position: 'absolute',
     right: spacing.md,
-    top: spacing.sm,
-    bottom: spacing.sm,
+    top: 0,
+    bottom: 0,
     justifyContent: 'center',
+    paddingHorizontal: 8,
   },
 });

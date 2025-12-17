@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, SectionList, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, SectionList, TouchableOpacity, RefreshControl } from 'react-native';
 import { colors, spacing } from '../utils/theme';
 import Screen from '../components/Screen';
 import Card from '../components/Card';
@@ -14,19 +14,29 @@ export default function ScheduleScreen() {
   const { user } = useAuth();
   const [range, setRange] = React.useState('week'); // 'week' | 'month'
   const [base, setBase] = React.useState([]);
-  React.useEffect(() => {
+  const [refreshing, setRefreshing] = React.useState(false);
+
+  const loadShifts = React.useCallback(async () => {
     if (!user?.id) return;
-    (async () => {
-      try {
-        // Backend filters by assignedUserId — no client-side filtering needed
-        const list = await apiGetShifts({ assignedUserId: user.id });
-        setBase(list);
-      } catch (error) {
-        console.error('Failed to fetch shifts:', error);
-        showToast('Nie udało się załadować grafiku', 'error');
-      }
-    })();
+    try {
+      const list = await apiGetShifts({ assignedUserId: user.id });
+      setBase(list);
+    } catch (error) {
+      console.error('Failed to fetch shifts:', error);
+      showToast('Nie udało się załadować grafiku', 'error');
+    }
   }, [user?.id]);
+
+  React.useEffect(() => {
+    loadShifts();
+  }, [loadShifts]);
+
+  const onRefresh = React.useCallback(async () => {
+    setRefreshing(true);
+    await loadShifts();
+    setRefreshing(false);
+  }, [loadShifts]);
+
   const filtered = React.useMemo(() => filterByRange(base, range), [base, range]);
   const sections = React.useMemo(() => groupByDate(filtered), [filtered]);
   return (
@@ -53,6 +63,15 @@ export default function ScheduleScreen() {
             </View>
           </Card>
         )}
+        ListEmptyComponent={
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyText}>Brak zmian w wybranym okresie</Text>
+            <Text style={styles.emptyHint}>Pociągnij w dół, aby odświeżyć</Text>
+          </View>
+        }
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
+        }
         stickySectionHeadersEnabled={false}
         contentContainerStyle={{ paddingVertical: spacing.md }}
       />
@@ -82,13 +101,29 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     marginBottom: spacing.md,
   },
+  emptyState: {
+    paddingVertical: spacing.xl * 2,
+    alignItems: 'center',
+  },
+  emptyText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  emptyHint: {
+    marginTop: spacing.sm,
+    fontSize: 14,
+    color: colors.muted,
+  },
 });
 
 function groupByDate(list) {
   const map = new Map();
   (list || []).filter(Boolean).forEach((shift) => {
     if (!shift?.date) return;
-    const key = `${dayNamePl(shift.date)}, ${formatDateLabel(shift.date)}`;
+    // Ensure date is a Date object
+    const dateObj = shift.date instanceof Date ? shift.date : new Date(shift.date);
+    const key = `${dayNamePl(dateObj)}, ${formatDateLabel(dateObj)}`;
     if (!map.has(key)) map.set(key, []);
     map.get(key).push(shift);
   });
@@ -100,12 +135,18 @@ function filterByRange(list, range) {
   if (range === 'month') {
     const m = now.getMonth();
     const y = now.getFullYear();
-    return list.filter(s => s.date.getMonth() === m && s.date.getFullYear() === y);
+    return list.filter(s => {
+      const dateObj = s.date instanceof Date ? s.date : new Date(s.date);
+      return dateObj.getMonth() === m && dateObj.getFullYear() === y;
+    });
   }
   // week: next 7 days including today
   const end = new Date(now);
   end.setDate(now.getDate() + 7);
-  return list.filter(s => s.date >= startOfDay(now) && s.date <= end);
+  return list.filter(s => {
+    const dateObj = s.date instanceof Date ? s.date : new Date(s.date);
+    return dateObj >= startOfDay(now) && dateObj <= end;
+  });
 }
 
 function startOfDay(d) {
@@ -118,6 +159,8 @@ function SegmentButton({ label, selected, onPress }) {
   return (
     <TouchableOpacity
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
       style={{
         flex: 1,
         paddingVertical: 10,
