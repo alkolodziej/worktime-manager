@@ -94,6 +94,14 @@ export async function apiGetUsers() {
   return http('/users');
 }
 
+export async function apiGetFilteredUsers({ date, positionIds, includeUnavailable = false } = {}) {
+  const params = new URLSearchParams();
+  if (date) params.append('date', typeof date === 'string' ? date : date.toISOString());
+  if (positionIds) params.append('positionIds', Array.isArray(positionIds) ? positionIds.join(',') : positionIds);
+  if (includeUnavailable) params.append('includeUnavailable', 'true');
+  return http(`/users/filter?${params.toString()}`);
+}
+
 // Availabilities
 export async function apiGetAvailabilities({ userId, from, to } = {}) {
   const params = new URLSearchParams();

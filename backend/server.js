@@ -88,17 +88,69 @@ app.post('/login', (req, res) => {
   res.json(user);
 });
 
-app.get('/users/:id', (req, res) => {
+// Filter users by positions and availability (for shift assignment)
+// MUST be before /users/:id to avoid route conflict
+app.get('/users/filter', (req, res) => {
   const db = readDb();
-  const user = db.users.find(u => u.id === req.params.id);
-  if (!user) return res.status(404).json({ error: 'not found' });
-  res.json(user);
+  const { date, positionIds, includeUnavailable } = req.query;
+  console.log('Filtering users with params:', { date, positionIds, includeUnavailable });
+  let usersList = (db.users || []).filter(u => !u.isEmployer);
+  
+  // Filter by positions (OR logic: user must have at least ONE of the specified positions)
+  if (positionIds && positionIds !== 'all') {
+    const positionIdsArray = positionIds.split(',');
+    usersList = usersList.filter(user => {
+      const userPositions = user.positions || [];
+      return positionIdsArray.some(posId => userPositions.includes(posId));
+    });
+  }
+  
+  // Get availability for the date if provided
+  let availabilityMap = {};
+  if (date) {
+    const dateStr = new Date(date).toISOString().split('T')[0];
+    (db.availabilities || []).forEach(avail => {
+      const availDate = typeof avail.date === 'string' ? avail.date.split('T')[0] : avail.date;
+      if (availDate === dateStr) {
+        availabilityMap[avail.userId] = avail;
+      }
+    });
+  }
+  
+  // Filter out unavailable users unless includeUnavailable is true
+  if (!includeUnavailable || includeUnavailable === 'false') {
+    usersList = usersList.filter(user => !!availabilityMap[user.id]);
+  }
+  
+  // Sort: available users first, then unavailable
+  usersList.sort((a, b) => {
+    const aHasAvail = !!availabilityMap[a.id];
+    const bHasAvail = !!availabilityMap[b.id];
+    if (aHasAvail && !bHasAvail) return -1;
+    if (!aHasAvail && bHasAvail) return 1;
+    return 0;
+  });
+  
+  // Attach availability to each user
+  const result = usersList.map(user => ({
+    ...user,
+    availability: availabilityMap[user.id] || null,
+  }));
+  
+  res.json(result);
 });
 
 // Get all users (for picker in admin screens)
 app.get('/users', (req, res) => {
   const db = readDb();
   res.json(db.users || []);
+});
+
+app.get('/users/:id', (req, res) => {
+  const db = readDb();
+  const user = db.users.find(u => u.id === req.params.id);
+  if (!user) return res.status(404).json({ error: 'not found' });
+  res.json(user);
 });
 
 app.get('/shifts', (req, res) => {
