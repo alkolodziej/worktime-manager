@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -6,198 +6,145 @@ import {
   Modal,
   ActivityIndicator,
   Animated,
-  Easing,
+  TouchableOpacity,
+  Dimensions
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors, spacing, radius } from '../utils/theme';
 
-export const LocationCheckModal = ({ visible, steps, currentStep, error }) => {
-  const scaleAnim = React.useRef(new Animated.Value(0)).current;
-  const fadeAnim = React.useRef(new Animated.Value(0)).current;
+const { width } = Dimensions.get('window');
 
-  React.useEffect(() => {
+export const LocationCheckModal = ({ 
+  visible, 
+  status = 'loading', // loading, success, error
+  message,
+  technicalDetails, // { accuracy, distance, allowedRadius }
+  onRetry,
+  onClose
+}) => {
+  const scaleAnim = useRef(new Animated.Value(0)).current;
+  const opacityAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
     if (visible) {
       Animated.parallel([
         Animated.spring(scaleAnim, {
           toValue: 1,
-          tension: 50,
-          friction: 7,
+          tension: 60,
+          friction: 8,
           useNativeDriver: true,
         }),
-        Animated.timing(fadeAnim, {
+        Animated.timing(opacityAnim, {
           toValue: 1,
-          duration: 300,
-          easing: Easing.out(Easing.ease),
+          duration: 200,
           useNativeDriver: true,
         }),
       ]).start();
     } else {
       scaleAnim.setValue(0);
-      fadeAnim.setValue(0);
+      opacityAnim.setValue(0);
     }
   }, [visible]);
 
-  const stepsList = [
-    { key: 'permissions', label: 'Włączanie uprawnień', icon: 'shield-check' },
-    { key: 'userLocation', label: 'Pobieranie Twojej lokalizacji', icon: 'map-marker' },
-    { key: 'restaurantLocation', label: 'Pobieranie lokalizacji restauracji', icon: 'store' },
-    { key: 'calculating', label: 'Obliczanie odległości', icon: 'ruler' },
-    { key: 'verification', label: 'Weryfikacja', icon: 'check-circle' },
-  ];
-
-  const getStepStatus = (stepKey) => {
-    if (currentStep === stepKey) return 'current';
-    const currentIndex = stepsList.findIndex(s => s.key === currentStep);
-    const stepIndex = stepsList.findIndex(s => s.key === stepKey);
-    if (stepIndex < currentIndex) return 'completed';
-    return 'pending';
-  };
-
-  const getStepColor = (status) => {
-    switch (status) {
-      case 'completed':
-        return colors.success;
-      case 'current':
-        return colors.primary;
-      case 'pending':
-        return colors.muted;
-      default:
-        return colors.muted;
+  const renderContent = () => {
+    if (status === 'success') {
+      return (
+        <View style={styles.resultContainer}>
+          <View style={[styles.iconCircle, { backgroundColor: colors.success + '20' }]}>
+            <MaterialCommunityIcons name="map-marker-check" size={48} color={colors.success} />
+          </View>
+          <Text style={styles.resultTitle}>Jesteś na miejscu</Text>
+          <Text style={styles.resultDesc}>
+            Twój czas pracy został rozpoczęty.
+          </Text>
+          {technicalDetails?.distance !== undefined && (
+            <View style={styles.statsBadge}>
+              <MaterialCommunityIcons name="ruler" size={14} color={colors.success} />
+              <Text style={styles.statsText}>{Math.round(technicalDetails.distance)}m od celu</Text>
+            </View>
+          )}
+        </View>
+      );
     }
-  };
 
-  const currentStepIndex = stepsList.findIndex(s => s.key === currentStep);
-  const progress = ((currentStepIndex + 1) / stepsList.length) * 100;
+    if (status === 'error') {
+      return (
+        <View style={styles.resultContainer}>
+          <View style={[styles.iconCircle, { backgroundColor: colors.danger + '20' }]}>
+            <MaterialCommunityIcons name="map-marker-remove" size={48} color={colors.danger} />
+          </View>
+          <Text style={styles.resultTitle}>Jesteś zbyt daleko</Text>
+          <Text style={styles.resultDesc}>
+            {message || 'Nie możemy potwierdzić Twojej obecności w pracy.'}
+          </Text>
+          
+          {technicalDetails && (
+            <View style={styles.detailsRow}>
+              <View style={styles.detailItem}>
+                <Text style={styles.detailLabel}>Odległość</Text>
+                <Text style={[styles.detailValue, { color: colors.danger }]}>
+                  {Math.round(technicalDetails.distance)}m
+                </Text>
+              </View>
+              <View style={styles.divider} />
+              <View style={styles.detailItem}>
+                 <Text style={styles.detailLabel}>Wymagane</Text>
+                 <Text style={[styles.detailValue, { color: colors.text }]}>
+                   &lt;{technicalDetails.allowedRadius}m
+                 </Text>
+              </View>
+            </View>
+          )}
+
+          <View style={styles.actions}>
+            <TouchableOpacity style={styles.retryButton} onPress={onRetry}>
+              <Text style={styles.retryText}>Spróbuj ponownie</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+              <Text style={styles.closeText}>Anuluj</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      );
+    }
+
+    // Loading / Processing
+    return (
+      <View style={styles.loadingWrapper}>
+        <View style={styles.radarContainer}>
+           <View style={[styles.radarRing, styles.radarRing1]} />
+           <View style={[styles.radarRing, styles.radarRing2]} />
+           <View style={styles.mapPin}>
+             <MaterialCommunityIcons name="map-marker" size={32} color="#fff" />
+           </View>
+        </View>
+        
+        <Text style={styles.loadingTitle}>{message || 'Weryfikacja lokalizacji...'}</Text>
+        
+        {technicalDetails?.accuracy && (
+           <Text style={styles.accuracyText}>
+             Dokładność GPS: ±{Math.round(technicalDetails.accuracy)}m
+           </Text>
+        )}
+      </View>
+    );
+  };
 
   return (
     <Modal visible={visible} transparent animationType="none">
-      <Animated.View
-        style={[
-          styles.overlay,
-          {
-            opacity: fadeAnim,
-          },
-        ]}
-      >
+      <View style={styles.overlay}>
         <Animated.View
           style={[
-            styles.container,
+            styles.card,
             {
-              transform: [
-                { scale: scaleAnim },
-                {
-                  translateY: scaleAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [50, 0],
-                  }),
-                },
-              ],
-              opacity: fadeAnim,
+              opacity: opacityAnim,
+              transform: [{ scale: scaleAnim }],
             },
           ]}
         >
-          <Text style={styles.title}>Weryfikacja lokalizacji</Text>
-          
-          {/* Progress Bar */}
-          <View style={styles.progressContainer}>
-            <View style={styles.progressBarBackground}>
-              <View
-                style={[
-                  styles.progressBar,
-                  { width: `${progress}%` },
-                ]}
-              />
-            </View>
-            <Text style={styles.progressText}>
-              {Math.round(progress)}%
-            </Text>
-          </View>
-
-          {/* Steps */}
-          <View style={styles.stepsContainer}>
-            {stepsList.map((step, index) => {
-              const status = getStepStatus(step.key);
-              const color = getStepColor(status);
-
-              return (
-                <View key={step.key} style={styles.step}>
-                  <View style={styles.stepHeader}>
-                    <View
-                      style={[
-                        styles.stepIcon,
-                        { backgroundColor: color },
-                      ]}
-                    >
-                      {status === 'current' ? (
-                        <ActivityIndicator size="small" color="#fff" />
-                      ) : status === 'completed' ? (
-                        <MaterialCommunityIcons
-                          name="check"
-                          size={18}
-                          color="#fff"
-                        />
-                      ) : (
-                        <MaterialCommunityIcons
-                          name={step.icon}
-                          size={18}
-                          color="#fff"
-                        />
-                      )}
-                    </View>
-                    <Text
-                      style={[
-                        styles.stepLabel,
-                        { color: status === 'pending' ? colors.muted : colors.text },
-                        status === 'current' && { fontWeight: '700' },
-                      ]}
-                    >
-                      {step.label}
-                    </Text>
-                  </View>
-
-                  {/* Connector line */}
-                  {index < stepsList.length - 1 && (
-                    <View
-                      style={[
-                        styles.connector,
-                        {
-                          backgroundColor:
-                            status === 'completed' ? colors.success : '#E6EAF2',
-                        },
-                      ]}
-                    />
-                  )}
-                </View>
-              );
-            })}
-          </View>
-
-          {/* Error message */}
-          {error && (
-            <View style={styles.errorContainer}>
-              <MaterialCommunityIcons
-                name="alert-circle"
-                size={20}
-                color={colors.danger}
-                style={{ marginRight: spacing.sm }}
-              />
-              <Text style={styles.errorText}>{error}</Text>
-            </View>
-          )}
-
-          {/* Loading indicator */}
-          {!error && (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator
-                size="large"
-                color={colors.primary}
-                style={{ marginBottom: spacing.md }}
-              />
-              <Text style={styles.loadingText}>Sprawdzam lokalizację...</Text>
-            </View>
-          )}
+          {renderContent()}
         </Animated.View>
-      </Animated.View>
+      </View>
     </Modal>
   );
 };
@@ -205,119 +152,163 @@ export const LocationCheckModal = ({ visible, steps, currentStep, error }) => {
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(0,0,0,0.6)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: spacing.lg,
   },
-  container: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: spacing.xl,
+  card: {
+    backgroundColor: '#fff',
     width: '100%',
-    maxWidth: 380,
+    maxWidth: 340,
+    borderRadius: radius.xl,
+    padding: spacing.xl,
+    alignItems: 'center',
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 10,
-    },
-    shadowOpacity: 0.3,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.2,
     shadowRadius: 20,
-    elevation: 10,
+    elevation: 8,
   },
-  title: {
+  loadingWrapper: {
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+  },
+  radarContainer: {
+    width: 100,
+    height: 100,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: spacing.lg,
+  },
+  radarRing: {
+    position: 'absolute',
+    borderRadius: 50,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  radarRing1: {
+    width: 60,
+    height: 60,
+    opacity: 0.3,
+  },
+  radarRing2: {
+    width: 90,
+    height: 90,
+    opacity: 0.1,
+  },
+  mapPin: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  loadingTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: colors.text,
+    textAlign: 'center',
+    marginBottom: spacing.xs,
+  },
+  accuracyText: {
+    fontSize: 13,
+    color: colors.muted,
+    marginTop: spacing.xs,
+  },
+  resultContainer: {
+    alignItems: 'center',
+    width: '100%',
+  },
+  iconCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  resultTitle: {
     fontSize: 20,
     fontWeight: '700',
     color: colors.text,
-    marginBottom: spacing.lg,
+    marginBottom: spacing.xs,
+  },
+  resultDesc: {
+    fontSize: 15,
+    color: colors.muted,
     textAlign: 'center',
-    letterSpacing: 0.3,
+    lineHeight: 22,
+    marginBottom: spacing.lg,
   },
-  progressContainer: {
-    marginBottom: spacing.xl,
+  statsBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.success + '15',
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderRadius: radius.full,
+    gap: 6,
   },
-  progressBarBackground: {
-    height: 6,
-    backgroundColor: '#F0F0F0',
-    borderRadius: 3,
-    overflow: 'hidden',
-    marginBottom: spacing.sm,
-  },
-  progressBar: {
-    height: '100%',
-    backgroundColor: colors.primary,
-    borderRadius: 3,
-  },
-  progressText: {
-    fontSize: 13,
-    color: colors.muted,
-    textAlign: 'right',
+  statsText: {
+    color: colors.success,
     fontWeight: '600',
-  },
-  stepsContainer: {
-    marginVertical: spacing.md,
-  },
-  step: {
-    marginVertical: spacing.xs,
-  },
-  stepHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.xs,
-  },
-  stepIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: spacing.md,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  stepLabel: {
-    fontSize: 15,
-    color: colors.text,
-    flex: 1,
-    fontWeight: '500',
-  },
-  connector: {
-    width: 2,
-    height: 12,
-    marginLeft: 15,
-    marginVertical: 2,
-    borderRadius: 1,
-  },
-  errorContainer: {
-    backgroundColor: '#FFE8E8',
-    borderRadius: 12,
-    padding: spacing.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: spacing.lg,
-    borderWidth: 1,
-    borderColor: '#FFD0D0',
-  },
-  errorText: {
-    color: colors.danger,
     fontSize: 14,
+  },
+  detailsRow: {
+    flexDirection: 'row',
+    backgroundColor: '#F7F7F7',
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    width: '100%',
+    marginBottom: spacing.lg,
+  },
+  detailItem: {
     flex: 1,
-    fontWeight: '500',
-  },
-  loadingContainer: {
     alignItems: 'center',
-    marginTop: spacing.lg,
-    paddingVertical: spacing.md,
   },
-  loadingText: {
+  divider: {
+    width: 1,
+    backgroundColor: '#E6EAF2',
+  },
+  detailLabel: {
+    fontSize: 12,
     color: colors.muted,
+    marginBottom: 2,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  detailValue: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  actions: {
+    width: '100%',
+    gap: spacing.sm,
+  },
+  retryButton: {
+    backgroundColor: colors.primary,
+    paddingVertical: 14,
+    borderRadius: radius.lg,
+    alignItems: 'center',
+  },
+  retryText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  closeButton: {
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  closeText: {
+    color: colors.textSecondary,
     fontSize: 15,
-    fontWeight: '500',
   },
 });

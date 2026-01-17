@@ -1,253 +1,341 @@
-import React from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, ActivityIndicator, RefreshControl } from 'react-native';
 import Screen from '../components/Screen';
 import Card from '../components/Card';
 import Badge from '../components/Badge';
-import Toast, { showToast } from '../components/Toast';
+import { showToast } from '../components/Toast';
 import { colors, spacing, radius } from '../utils/theme';
 import { useAuth } from '../context/AuthContext';
-import { apiGetShifts, apiCreateSwap, apiGetSwaps, apiGetUsers, apiCancelSwap } from '../utils/api';
+import { apiGetShifts, apiGetSwaps, apiGetUsers, apiCancelSwap, apiAcceptSwap } from '../utils/api';
 import { formatTimeRange } from '../utils/format';
-
+import { Ionicons } from '@expo/vector-icons';
 
 export default function SwapsScreen() {
   const { user } = useAuth();
-  const [shifts, setShifts] = React.useState([]);
-  const [swaps, setSwaps] = React.useState([]);
-  const [users, setUsers] = React.useState([]);
-  const [loading, setLoading] = React.useState(false);
-  const [cancelingSwapId, setCancelingSwapId] = React.useState(null);
+  const [activeTab, setActiveTab] = useState('market'); // 'market' | 'mine'
+  
+  const [swaps, setSwaps] = useState([]);
+  const [shifts, setShifts] = useState([]);
+  const [users, setUsers] = useState([]);
+  
+  const [loading, setLoading] = useState(false);
+  const [processingId, setProcessingId] = useState(null);
 
-  const load = React.useCallback(async () => {
+  const loadData = useCallback(async () => {
+    if (!user?.id) return;
     setLoading(true);
     try {
-      const s = await apiGetShifts({});
-      const upcoming = s.filter((x) => x.date >= startOfDay(new Date()));
-      setShifts(upcoming);
-    } catch {}
-    try {
-      const u = await apiGetUsers();
-      setUsers(u);
-    } catch {}
-    try {
-      if (user?.id) {
-        const my = await apiGetSwaps({ userId: user.id });
-        setSwaps(my);
-      }
-    } catch {}
-    setLoading(false);
+      const [allSwaps, allShifts, allUsers] = await Promise.all([
+        apiGetSwaps({}), // Get ALL swaps to see market
+        apiGetShifts({}), // Get all shifts to resolve details
+        apiGetUsers(),
+      ]);
+      setSwaps(allSwaps);
+      setShifts(allShifts);
+      setUsers(allUsers);
+    } catch (e) {
+      console.error(e);
+      showToast('Błąd pobierania danych', 'error');
+    } finally {
+      setLoading(false);
+    }
   }, [user?.id]);
 
-  React.useEffect(() => { load(); }, [load]);
+  useEffect(() => { loadData(); }, [loadData]);
 
-  // Check if user already requested a swap for this shift
-  const hasSwapRequest = (shiftId) => {
-    return swaps.some(s => s.shiftId === shiftId && s.status === 'pending');
-  };
+  // Derived filtered lists
+  const marketSwaps = useMemo(() => {
+    return swaps.filter(s => 
+      s.status === 'pending' && 
+      s.requesterId !== user?.id &&
+      (!s.targetUserId || s.targetUserId === user?.id) // Open or directed to me
+    );
+  }, [swaps, user?.id]);
 
-  const requestSwap = async (shiftId, targetUserId) => {
-    if (!user?.id) return;
+  const mySwaps = useMemo(() => {
+    return swaps.filter(s => s.requesterId === user?.id);
+  }, [swaps, user?.id]);
 
-    if (hasSwapRequest(shiftId)) {
-      showToast('Masz już prośbę o zamianę dla tej zmiany', 'error');
-      return;
-    }
-
-    try {
-      await apiCreateSwap({ 
-        shiftId, 
-        requesterId: user.id,
-        targetUserId: targetUserId || undefined
-      });
-      showToast('Prośba wysłana', 'success');
-      await load();
-    } catch (e) {
-      showToast('Błąd podczas tworzenia prośby', 'error');
-    }
-  };
-
-  const handleCancelSwap = (swapId) => {
+  const handleTakeSwap = async (swap) => {
     Alert.alert(
-      'Anuluj prośbę',
-      'Czy na pewno chcesz anulować tę prośbę o zamianę?',
+      'Potwierdzenie',
+      'Czy na pewno chcesz przejąć tę zmianę?',
+      [
+        { text: 'Anuluj', style: 'cancel' },
+        {
+          text: 'Tak, biorę!',
+          onPress: async () => {
+            setProcessingId(swap.id);
+            try {
+              await apiAcceptSwap({ id: swap.id, actorUserId: user.id });
+              showToast('Zmiana przejęta! Sprawdź swój grafik.', 'success');
+              await loadData();
+            } catch (e) {
+              showToast('Nie udało się przejąć zmiany', 'error');
+            } finally {
+              setProcessingId(null);
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleCancelSwap = async (swap) => {
+    if (swap.status !== 'pending') return;
+    
+    Alert.alert(
+      'Anulowanie',
+      'Czy chcesz wycofać ofertę zamiany?',
       [
         { text: 'Nie', style: 'cancel' },
         {
-          text: 'Tak, anuluj',
+          text: 'Wycofaj',
           style: 'destructive',
           onPress: async () => {
+            setProcessingId(swap.id);
             try {
-              setCancelingSwapId(swapId);
-              await apiCancelSwap({ id: swapId, actorUserId: user.id });
-              showToast('Prośba anulowana', 'success');
-              await load();
+              await apiCancelSwap({ id: swap.id, actorUserId: user.id });
+              showToast('Oferta wycofana', 'success');
+              await loadData();
             } catch (e) {
-              showToast('Błąd anulowania prośby', 'error');
+              showToast('Błąd usuwania oferty', 'error');
             } finally {
-              setCancelingSwapId(null);
+              setProcessingId(null);
             }
-          },
-        },
+          }
+        }
       ]
+    );
+  };
+
+  const renderSwapItem = ({ item }) => {
+    const shift = shifts.find(s => s.id === item.shiftId);
+    if (!shift) return null; // Orphaned swap?
+
+    const requester = users.find(u => u.id === item.requesterId);
+    const dateObj = new Date(shift.date);
+    const isMine = item.requesterId === user?.id;
+    const isPending = item.status === 'pending';
+
+    return (
+      <Card style={[styles.card, !isPending && { opacity: 0.6 }]}>
+        <View style={styles.cardHeader}>
+          <View>
+             <Text style={styles.dateText}>
+               {dateObj.toLocaleDateString('pl-PL', { weekday: 'long', day: 'numeric', month: 'long' })}
+             </Text>
+             <Text style={styles.timeText}>{formatTimeRange(shift.start, shift.end)}</Text>
+          </View>
+          <Badge 
+            label={isMine ? prettyStatus(item.status) : (requester?.name || 'Ktoś')} 
+            tone={isMine ? getStatusTone(item.status) : 'info'} 
+          />
+        </View>
+
+        <View style={styles.detailsRow}>
+           <Text style={styles.positionText}>{shift.role}</Text>
+           <Text style={styles.locationText}>• {shift.location || 'Lokal główny'}</Text>
+        </View>
+
+        {/* Action Buttons */}
+        {isPending && (
+          <View style={styles.actionRow}>
+            {isMine ? (
+               <TouchableOpacity 
+                 style={[styles.btn, styles.btnCancel]} 
+                 onPress={() => handleCancelSwap(item)}
+                 disabled={!!processingId}
+               >
+                 {processingId === item.id ? <ActivityIndicator color="#C0392B" /> : <Text style={styles.btnCancelText}>Wycofaj ofertę</Text>}
+               </TouchableOpacity>
+            ) : (
+               <TouchableOpacity 
+                 style={[styles.btn, styles.btnTake]} 
+                 onPress={() => handleTakeSwap(item)}
+                 disabled={!!processingId}
+               >
+                  {processingId === item.id ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnTakeText}>Weź zmianę</Text>}
+               </TouchableOpacity>
+            )}
+          </View>
+        )}
+      </Card>
     );
   };
 
   return (
     <Screen>
-      <Toast />
-      <Text style={styles.title}>Zamiana zmian</Text>
-      <Text style={styles.subtitle}>Wybierz zmianę, aby poprosić o zamianę</Text>
+       <Text style={styles.headerTitle}>Giełda Zmian</Text>
+       
+       <View style={styles.tabs}>
+         <TabButton title="Dostępne (Giełda)" active={activeTab === 'market'} onPress={() => setActiveTab('market')} count={marketSwaps.length} />
+         <TabButton title="Moje Oferty" active={activeTab === 'mine'} onPress={() => setActiveTab('mine')} />
+       </View>
 
-      <FlatList
-        data={shifts}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={{ gap: spacing.md, paddingVertical: spacing.md }}
-        refreshing={loading}
-        onRefresh={load}
-        ListEmptyComponent={
-          !loading && (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>Brak nadchodzących zmian</Text>
-            </View>
-          )
-        }
-        renderItem={({ item: shift }) => {
-          const assignedUser = users.find(u => u.id === shift.assignedUserId);
-          const hasRequest = hasSwapRequest(shift.id);
-          const isMyShift = shift.assignedUserId === user?.id;
-          const dateObj = shift.date instanceof Date ? shift.date : new Date(shift.date);
-          
-          return (
-            <Card>
-              <View style={{ marginBottom: spacing.md }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <View style={{ flex: 1, marginRight: spacing.md }}>
-                    <Text style={styles.itemTitle}>
-                      {dateObj.toLocaleDateString('pl-PL', { weekday: 'short', month: 'short', day: 'numeric' })}
-                    </Text>
-                    <Text style={styles.itemMeta}>{formatTimeRange(shift.start, shift.end)}</Text>
-                    <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm }}>
-                      <Badge label={shift.role} tone="primary" size="small" />
-                      <Badge label={shift.location || 'Lokal główny'} tone="neutral" size="small" />
-                    </View>
-                    {assignedUser && (
-                      <Text style={[styles.itemMeta, { marginTop: spacing.sm }]}>
-                        👤 {assignedUser.name}
-                      </Text>
-                    )}
-                  </View>
-                  <TouchableOpacity
-                    style={[styles.smallBtn, (hasRequest || isMyShift) && styles.smallBtnDisabled]}
-                    onPress={() => requestSwap(shift.id, shift.assignedUserId)}
-                    disabled={hasRequest || isMyShift}
-                  >
-                    {hasRequest ? (
-                      <Text style={styles.smallBtnText}>✓ Prośba wysłana</Text>
-                    ) : isMyShift ? (
-                      <Text style={styles.smallBtnText}>Moja zmiana</Text>
-                    ) : (
-                      <Text style={styles.smallBtnText}>Poproś</Text>
-                    )}
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </Card>
-          );
-        }}
-      />
-
-      <Text style={[styles.subtitle, { marginTop: spacing.lg }]}>Moje prośby o zamianę</Text>
-      <FlatList
-        data={swaps}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={{ gap: spacing.md, paddingVertical: spacing.md }}
-        ListEmptyComponent={
-          !loading && (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>Brak próśb o zamianę</Text>
-            </View>
-          )
-        }
-        renderItem={({ item: swap }) => {
-          const shift = shifts.find(s => s.id === swap.shiftId);
-          const targetUser = users.find(u => u.id === swap.targetUserId);
-          const statusBadge = swap.status === 'pending' ? 'primary' : swap.status === 'accepted' ? 'success' : 'danger';
-          
-          return (
-            <Card style={{ opacity: swap.status === 'cancelled' ? 0.6 : 1 }}>
-              <View style={{ marginBottom: spacing.md }}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: spacing.md }}>
-                  <View style={{ flex: 1, marginRight: spacing.md }}>
-                    {shift && (
-                      <>
-                        <Text style={styles.itemTitle}>
-                          {(shift.date instanceof Date ? shift.date : new Date(shift.date)).toLocaleDateString('pl-PL', { weekday: 'short', month: 'short', day: 'numeric' })}
-                        </Text>
-                        <Text style={styles.itemMeta}>{formatTimeRange(shift.start, shift.end)}</Text>
-                        <Badge label={prettyStatus(swap.status)} tone={statusBadge} style={{ marginTop: spacing.sm }} />
-                      </>
-                    )}
-                    {!shift && (
-                      <Text style={styles.itemMeta}>Zmiana #id:{swap.shiftId}</Text>
-                    )}
-                  </View>
-                  {swap.status === 'pending' && (
-                    <TouchableOpacity
-                      style={[styles.smallBtn, { backgroundColor: '#FEE2E2' }]}
-                      onPress={() => handleCancelSwap(swap.id)}
-                      disabled={cancelingSwapId === swap.id}
-                    >
-                      {cancelingSwapId === swap.id ? (
-                        <ActivityIndicator size="small" color="#DC2626" />
-                      ) : (
-                        <Text style={[styles.smallBtnText, { color: '#DC2626' }]}>Anuluj</Text>
-                      )}
-                    </TouchableOpacity>
-                  )}
-                </View>
-              </View>
-            </Card>
-          );
-        }}
-      />
+       <FlatList
+         data={activeTab === 'market' ? marketSwaps : mySwaps}
+         keyExtractor={item => item.id}
+         renderItem={renderSwapItem}
+         contentContainerStyle={{ paddingVertical: spacing.md, paddingBottom: 100 }}
+         refreshControl={<RefreshControl refreshing={loading} onRefresh={loadData} />}
+         ListEmptyComponent={
+           <View style={styles.emptyState}>
+             <Ionicons name={activeTab === 'market' ? "basket-outline" : "list-outline"} size={48} color={colors.muted + '50'} />
+             <Text style={styles.emptyText}>
+               {activeTab === 'market' 
+                 ? 'Jesteś na bieżąco! Brak dostępnych zmian do wzięcia.' 
+                 : 'Nie masz aktywnych ofert zamiany.'}
+             </Text>
+           </View>
+         }
+       />
     </Screen>
   );
 }
 
-function startOfDay(d) { const x = new Date(d); x.setHours(0,0,0,0); return x; }
+function TabButton({ title, active, onPress, count }) {
+  return (
+    <TouchableOpacity onPress={onPress} style={[styles.tab, active && styles.tabActive]}>
+      <Text style={[styles.tabText, active && styles.tabTextActive]}>{title}</Text>
+      {count > 0 && (
+        <View style={styles.badge}>
+          <Text style={styles.badgeText}>{count}</Text>
+        </View>
+      )}
+    </TouchableOpacity>
+  );
+}
+
 function prettyStatus(s) {
-  if (s === 'pending') return 'oczekujące';
-  if (s === 'accepted') return 'zaakceptowane';
-  if (s === 'rejected') return 'odrzucone';
-  if (s === 'cancelled') return 'anulowane';
-  return s;
+  const map = { pending: 'Oczekuje', accepted: 'Zaakceptowana', rejected: 'Odrzucona', cancelled: 'Anulowana' };
+  return map[s] || s;
+}
+
+function getStatusTone(s) {
+  if (s === 'pending') return 'warning';
+  if (s === 'accepted') return 'success';
+  return 'neutral';
 }
 
 const styles = StyleSheet.create({
-  title: { fontSize: 22, fontWeight: '700', color: colors.text, marginBottom: spacing.sm },
-  subtitle: { color: colors.muted, marginTop: spacing.md, marginBottom: spacing.md },
-  itemTitle: { fontWeight: '700', color: colors.text, fontSize: 15 },
-  itemMeta: { marginTop: 4, color: colors.muted, fontSize: 13 },
-  smallBtn: {
-    backgroundColor: colors.primary,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
+  headerTitle: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: colors.text,
+    marginBottom: spacing.lg,
+  },
+  tabs: {
+    flexDirection: 'row',
+    backgroundColor: '#F3F4F6',
+    padding: 4,
+    borderRadius: radius.lg,
+    marginBottom: spacing.lg,
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
     borderRadius: radius.md,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 6,
   },
-  smallBtnDisabled: {
-    backgroundColor: '#E0F2FE',
+  tabActive: {
+    backgroundColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
   },
-  smallBtnText: { 
-    color: '#fff', 
+  tabText: {
+    fontWeight: '600',
+    color: colors.textSecondary,
+    fontSize: 14,
+  },
+  tabTextActive: {
+    color: colors.text,
+  },
+  badge: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radius.full,
+  },
+  badgeText: {
+    color: '#fff',
+    fontSize: 10,
     fontWeight: '700',
-    fontSize: 12,
   },
-  emptyState: {
-    paddingVertical: spacing.xl,
+  card: {
+    marginBottom: spacing.md,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: spacing.sm,
+  },
+  dateText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.text,
+    textTransform: 'capitalize',
+  },
+  timeText: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  detailsRow: {
+    flexDirection: 'row',
+    marginBottom: spacing.lg,
+  },
+  positionText: {
+    fontWeight: '600',
+    color: colors.text,
+  },
+  locationText: {
+    color: colors.muted,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    borderTopWidth: 1,
+    borderTopColor: '#F2F4F8',
+    paddingTop: spacing.md,
+  },
+  btn: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: radius.md,
+    minWidth: 120,
     alignItems: 'center',
   },
+  btnTake: {
+    backgroundColor: colors.primary,
+  },
+  btnTakeText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  btnCancel: {
+    backgroundColor: '#FEE2E2',
+  },
+  btnCancelText: {
+    color: '#DC2626',
+    fontWeight: '600',
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingTop: 60,
+  },
   emptyText: {
-    fontSize: 14,
+    marginTop: spacing.md,
+    fontSize: 16,
     color: colors.muted,
+    textAlign: 'center',
+    lineHeight: 22,
   },
 });

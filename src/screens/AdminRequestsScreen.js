@@ -1,137 +1,214 @@
-import React from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import Screen from '../components/Screen';
 import Card from '../components/Card';
+import Badge from '../components/Badge';
 import { colors, spacing, radius } from '../utils/theme';
 import { apiGetSwaps, apiAcceptSwap, apiRejectSwap, apiGetAvailabilities, apiGetUsers } from '../utils/api';
 import { showToast } from '../components/Toast';
+import { Ionicons } from '@expo/vector-icons';
 
 export default function AdminRequestsScreen() {
-  const [swaps, setSwaps] = React.useState([]);
-  const [avails, setAvails] = React.useState([]);
-  const [users, setUsers] = React.useState([]);
-  const [loading, setLoading] = React.useState(false);
+  const [activeTab, setActiveTab] = useState('swaps'); // 'swaps' | 'avails'
+  const [swaps, setSwaps] = useState([]);
+  const [avails, setAvails] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(false);
 
-  const load = React.useCallback(async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
-    try { 
-      setSwaps(await apiGetSwaps({}));
-      setAvails(await apiGetAvailabilities({}));
-      setUsers(await apiGetUsers());
-    } catch (error) {
-      showToast('Błąd ładowania danych', 'error');
+    try {
+      const [s, a, u] = await Promise.all([
+        apiGetSwaps({}),
+        apiGetAvailabilities({}),
+        apiGetUsers()
+      ]);
+      setSwaps(s);
+      setAvails(a);
+      setUsers(u);
+    } catch (err) {
+      showToast('Błąd pobierania danych', 'error');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
-  React.useEffect(() => { load(); }, [load]);
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [loadData])
+  );
 
   const getUserName = (userId) => {
-    const user = users.find(u => u.id === userId);
-    return user?.name || `Użytkownik #${userId}`;
+    const u = users.find(x => x.id === userId);
+    return u ? u.name : `ID: ${userId}`;
   };
 
-  const accept = async (id) => { 
-    try { 
-      await apiAcceptSwap({ id }); 
-      showToast('Zamiana zaakceptowana', 'success');
-      await load(); 
-    } catch {
-      showToast('Błąd akceptacji', 'error');
-    } 
-  };
-  
-  const reject = async (id) => { 
-    try { 
-      await apiRejectSwap({ id }); 
-      showToast('Zamiana odrzucona', 'success');
-      await load(); 
-    } catch {
-      showToast('Błąd odrzucenia', 'error');
+  const handleAcceptSwap = async (swapId) => {
+    try {
+      await apiAcceptSwap({ id: swapId });
+      showToast('Zaakceptowano zamianę', 'success');
+      loadData();
+    } catch (error) {
+           showToast('Wystąpił błąd', 'error');
     }
   };
 
-  // Filter only pending swaps
-  const pendingSwaps = swaps.filter(s => s.status === 'pending');
+  const handleRejectSwap = async (swapId) => {
+      Alert.alert('Odrzucić?', 'Czy na pewno chcesz odrzucić tę prośbę?', [
+          { text: 'Anuluj', style: 'cancel' },
+          { 
+              text: 'Odrzuć', 
+              style: 'destructive', 
+              onPress: async () => {
+                try {
+                    await apiRejectSwap({ id: swapId });
+                    showToast('Odrzucono', 'success');
+                    loadData();
+                } catch {
+                    showToast('Błąd', 'error');
+                }
+              }
+          }
+      ]);
+  };
+
+  // -- RENDERERS --
+
+  const renderSwapItem = ({ item }) => {
+    const requester = getUserName(item.requesterId);
+    const target = item.targetUserId ? getUserName(item.targetUserId) : 'Ktokolwiek';
+    
+    return (
+      <Card style={styles.card}>
+        <View style={styles.cardHeader}>
+          <Badge text={`Zmiana #${item.shiftId}`} variant="secondary" />
+          <Badge text={item.status === 'pending' ? 'Oczekuje' : item.status} variant={item.status === 'pending' ? 'warning' : 'default'} />
+        </View>
+        
+        <View style={styles.cardBody}>
+            <View style={styles.row}>
+                <Ionicons name="person-arrow-up-outline" size={16} color={colors.textSecondary} />
+                <Text style={styles.text}>{requester} chce oddać zmianę</Text>
+            </View>
+            <View style={styles.row}>
+                <Ionicons name="person-arrow-down-outline" size={16} color={colors.textSecondary} />
+                <Text style={styles.text}>Dla: <Text style={{fontWeight:'bold'}}>{target}</Text></Text>
+            </View>
+            {item.reason && (
+                <Text style={styles.reason}>"{item.reason}"</Text>
+            )}
+        </View>
+
+        {item.status === 'pending' && (
+            <View style={styles.actions}>
+                <TouchableOpacity style={[styles.btn, styles.btnReject]} onPress={() => handleRejectSwap(item.id)}>
+                    <Text style={styles.btnTextDanger}>Odrzuć</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.btn, styles.btnAccept]} onPress={() => handleAcceptSwap(item.id)}>
+                    <Text style={styles.btnTextWhite}>Akceptuj</Text>
+                </TouchableOpacity>
+            </View>
+        )}
+      </Card>
+    );
+  };
+
+  const renderAvailItem = ({ item }) => {
+    // availability item structure? assuming: { userId, date, start, end, ... }
+    const user = getUserName(item.userId);
+    const dateStr = new Date(item.date).toLocaleDateString('pl-PL', { weekday: 'short', day: '2-digit', month: 'short' });
+
+    return (
+        <Card style={styles.card}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <View>
+                    <Text style={styles.availOwner}>{user}</Text>
+                    <View style={styles.row}>
+                        <Ionicons name="calendar-outline" size={14} color={colors.muted} />
+                        <Text style={styles.availDate}>{dateStr}</Text>
+                        <Ionicons name="time-outline" size={14} color={colors.muted} style={{marginLeft: 8}} />
+                        <Text style={styles.availDate}>{item.start} - {item.end}</Text>
+                    </View>
+                </View>
+                <Badge text="Dostępność" variant="outline" />
+            </View>
+        </Card>
+    );
+  };
+
+  const pendingSwaps = swaps.filter(s => s.status === 'pending'); // Show only pending in this view? Or all? code said "Pending"
+  // Let's show all pending first, maybe history later. For now, matching old logic.
+  
+  const data = activeTab === 'swaps' ? pendingSwaps : avails;
 
   return (
     <Screen>
-      <Text style={styles.title}>Prośby i zgłoszenia</Text>
+      <View style={styles.header}>
+        <Text style={styles.title}>Zgłoszenia</Text>
+      </View>
 
-      <Text style={[styles.subtitle, { marginTop: spacing.md }]}>Zamiany zmian (oczekujące)</Text>
+      <View style={styles.tabs}>
+          <TouchableOpacity 
+            style={[styles.tab, activeTab === 'swaps' && styles.tabActive]} 
+            onPress={() => setActiveTab('swaps')}
+          >
+              <Text style={[styles.tabText, activeTab === 'swaps' && styles.tabTextActive]}>Zamiany ({pendingSwaps.length})</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.tab, activeTab === 'avails' && styles.tabActive]} 
+            onPress={() => setActiveTab('avails')}
+          >
+              <Text style={[styles.tabText, activeTab === 'avails' && styles.tabTextActive]}>Dostępności ({avails.length})</Text>
+          </TouchableOpacity>
+      </View>
+
       <FlatList
-        data={pendingSwaps}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={{ gap: spacing.md, paddingVertical: spacing.md }}
+        data={data}
+        keyExtractor={item => item.id}
+        renderItem={activeTab === 'swaps' ? renderSwapItem : renderAvailItem}
+        contentContainerStyle={{ paddingBottom: spacing.xl }}
+        ListEmptyComponent={
+            <View style={styles.empty}>
+                <Ionicons name="file-tray-outline" size={48} color={colors.border} />
+                <Text style={styles.emptyText}>Brak elementów</Text>
+            </View>
+        }
         refreshing={loading}
-        onRefresh={load}
-        ListEmptyComponent={
-          !loading && (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>Brak oczekujących zamian</Text>
-            </View>
-          )
-        }
-        renderItem={({ item }) => (
-          <Card>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.itemTitle}>Zmiana #{item.shiftId}</Text>
-                <Text style={styles.itemMeta}>
-                  Od: {getUserName(item.requesterId)}
-                  {item.targetUserId && ` → Do: ${getUserName(item.targetUserId)}`}
-                </Text>
-              </View>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                <TouchableOpacity style={styles.smallBtn} onPress={() => accept(item.id)}>
-                  <Text style={styles.smallBtnText}>Akceptuj</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.smallBtnDanger} onPress={() => reject(item.id)}>
-                  <Text style={styles.smallBtnText}>Odrzuć</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </Card>
-        )}
-      />
-
-      <Text style={styles.subtitle}>Dostępności pracowników</Text>
-      <FlatList
-        data={avails}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={{ gap: spacing.md, paddingVertical: spacing.md }}
-        ListEmptyComponent={
-          !loading && (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>Brak zgłoszeń dostępności</Text>
-            </View>
-          )
-        }
-        renderItem={({ item }) => (
-          <Card>
-            <Text style={styles.itemTitle}>{getUserName(item.userId)}</Text>
-            <Text style={styles.itemMeta}>{new Date(item.date).toLocaleDateString('pl-PL')} • {item.start}–{item.end}</Text>
-          </Card>
-        )}
+        onRefresh={loadData}
       />
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  title: { fontSize: 22, fontWeight: '700', color: colors.text },
-  subtitle: { color: colors.muted, marginTop: spacing.md },
-  itemTitle: { fontWeight: '700', color: colors.text },
-  itemMeta: { marginTop: 4, color: colors.muted, fontSize: 13 },
-  smallBtn: { backgroundColor: colors.primary, paddingHorizontal: 12, paddingVertical: 8, borderRadius: radius.md },
-  smallBtnDanger: { backgroundColor: '#D7263D', paddingHorizontal: 12, paddingVertical: 8, borderRadius: radius.md },
-  smallBtnText: { color: '#fff', fontWeight: '700', fontSize: 12 },
-  emptyState: {
-    paddingVertical: spacing.xl,
-    alignItems: 'center',
-  },
-  emptyText: {
-    fontSize: 14,
-    color: colors.muted,
-  },
+  header: { marginBottom: spacing.md, marginTop: spacing.sm },
+  title: { fontSize: 24, fontWeight: '800', color: colors.text },
+  
+  tabs: { flexDirection: 'row', marginBottom: spacing.md, backgroundColor: colors.surface, borderRadius: radius.md, padding: 4 },
+  tab: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: radius.sm },
+  tabActive: { backgroundColor: '#fff', shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 2, elevation: 1 },
+  tabText: { fontWeight: '600', color: colors.muted },
+  tabTextActive: { color: colors.primary },
+
+  card: { marginBottom: spacing.sm }, // Override Card margin if needed
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
+  cardBody: { gap: 6 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  text: { fontSize: 14, color: colors.text },
+  reason: { fontStyle: 'italic', color: colors.muted, marginTop: 4, fontSize: 13 },
+  
+  actions: { flexDirection: 'row', gap: 10, marginTop: 16 },
+  btn: { flex: 1, paddingVertical: 10, borderRadius: radius.md, alignItems: 'center' },
+  btnReject: { backgroundColor: '#FEE2E2' },
+  btnAccept: { backgroundColor: colors.primary },
+  btnTextDanger: { color: '#DC2626', fontWeight: '700' },
+  btnTextWhite: { color: '#fff', fontWeight: '700' },
+
+  availOwner: { fontSize: 16, fontWeight: '700', color: colors.text },
+  availDate: { fontSize: 14, color: colors.muted },
+
+  empty: { alignItems: 'center', padding: 40 },
+  emptyText: { color: colors.muted, marginTop: 10 }
 });

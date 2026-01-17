@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, TouchableOpacity, Text, StyleSheet, Platform, Modal } from 'react-native';
 import RNDateTimePicker from '@react-native-community/datetimepicker';
 import { colors, spacing, radius } from '../utils/theme';
@@ -12,41 +12,57 @@ export default function DateTimePicker({
   style
 }) {
   const [show, setShow] = useState(false);
+  const [tempDate, setTempDate] = useState(new Date());
 
-  const handleChange = (event, selectedValue) => {
-    if (Platform.OS === 'android') {
-      setShow(false);
+  useEffect(() => {
+    if (show && value) {
+      setTempDate(value instanceof Date ? value : new Date(value));
+    } else if (show && !value) {
+      setTempDate(new Date());
     }
-    if (selectedValue) {
+  }, [show, value]);
+
+  const handleAndroidChange = (event, selectedValue) => {
+    setShow(false);
+    if (event.type === 'set' && selectedValue) {
       onChange(event, selectedValue);
-      if (Platform.OS === 'ios') {
-        setShow(false);
-      }
     }
   };
 
-  const handleCancel = () => {
+  const handleIOSChange = (event, selectedValue) => {
+    if (selectedValue) {
+      setTempDate(selectedValue);
+    }
+  };
+
+  const confirmIOS = () => {
+    onChange({ type: 'set' }, tempDate);
+    setShow(false);
+  };
+
+  const cancelIOS = () => {
     setShow(false);
   };
 
   const formatValue = () => {
-    if (!value || !(value instanceof Date)) return placeholder;
+    if (!value) return placeholder;
+    const dateVal = value instanceof Date ? value : new Date(value);
+    
     try {
       if (mode === 'date') {
-        return value.toLocaleDateString('pl-PL', {
+        return dateVal.toLocaleDateString('pl-PL', {
           weekday: 'short',
           day: 'numeric',
-          month: 'short'
+          month: 'long'
         });
       } else {
-        return value.toLocaleTimeString('pl-PL', { 
+        return dateVal.toLocaleTimeString('pl-PL', { 
           hour: '2-digit', 
           minute: '2-digit',
           hour12: false 
         });
       }
     } catch (error) {
-      console.warn('Error formatting date:', error);
       return placeholder;
     }
   };
@@ -57,6 +73,7 @@ export default function DateTimePicker({
       <TouchableOpacity 
         onPress={() => setShow(true)}
         style={styles.input}
+        activeOpacity={0.7}
       >
         <Text style={[
           styles.value, 
@@ -64,43 +81,50 @@ export default function DateTimePicker({
         ]}>
           {formatValue()}
         </Text>
-        <Text style={{ fontSize: 18 }}>📅</Text>
+        <View style={styles.iconContainer}>
+            <Text style={styles.icon}>{mode === 'date' ? '📅' : '⏰'}</Text>
+        </View>
       </TouchableOpacity>
 
       {/* iOS Modal Picker */}
       {show && Platform.OS === 'ios' && (
         <Modal
           transparent={true}
-          animationType="slide"
+          animationType="fade"
           visible={show}
-          onRequestClose={handleCancel}
+          onRequestClose={cancelIOS}
         >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalBackdrop} />
-            <View style={styles.modalContent}>
+          <TouchableOpacity 
+            style={styles.modalOverlay} 
+            activeOpacity={1} 
+            onPress={cancelIOS}
+          >
+            <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
               <View style={styles.modalHeader}>
-                <TouchableOpacity onPress={handleCancel}>
+                <TouchableOpacity onPress={cancelIOS} style={styles.headerButton}>
                   <Text style={styles.modalCancelText}>Anuluj</Text>
                 </TouchableOpacity>
                 <Text style={styles.modalTitle}>
                   {mode === 'date' ? 'Wybierz datę' : 'Wybierz godzinę'}
                 </Text>
-                <TouchableOpacity onPress={() => setShow(false)}>
+                <TouchableOpacity onPress={confirmIOS} style={styles.headerButton}>
                   <Text style={styles.modalConfirmText}>Gotowe</Text>
                 </TouchableOpacity>
               </View>
-              <RNDateTimePicker
-                value={value instanceof Date ? value : new Date()}
-                mode={mode}
-                onChange={handleChange}
-                display="spinner"
-                is24Hour={true}
-                minimumDate={mode === 'date' ? new Date() : undefined}
-                textColor={colors.text}
-                style={{ height: 200 }}
-              />
+              <View style={styles.pickerContainer}>
+                <RNDateTimePicker
+                  value={tempDate}
+                  mode={mode}
+                  onChange={handleIOSChange}
+                  display="spinner"
+                  is24Hour={true}
+                  locale="pl-PL"
+                  textColor={colors.text}
+                  style={{ height: 200, width: '100%' }}
+                />
+              </View>
             </View>
-          </View>
+          </TouchableOpacity>
         </Modal>
       )}
 
@@ -109,10 +133,9 @@ export default function DateTimePicker({
         <RNDateTimePicker
           value={value instanceof Date ? value : new Date()}
           mode={mode}
-          onChange={handleChange}
+          onChange={handleAndroidChange}
           display="default"
           is24Hour={true}
-          minimumDate={mode === 'date' ? new Date() : undefined}
         />
       )}
     </View>
@@ -121,40 +144,60 @@ export default function DateTimePicker({
 
 const styles = StyleSheet.create({
   label: {
-    color: colors.muted,
-    marginBottom: 6,
+    color: colors.textSecondary,
+    marginBottom: 8,
+    fontSize: 14,
+    fontWeight: '500',
   },
   input: {
-    backgroundColor: '#F2F4F8',
-    borderRadius: radius.md,
+    backgroundColor: '#fff',
+    borderRadius: radius.lg,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    paddingVertical: 14,
     borderWidth: 1,
     borderColor: '#E6EAF2',
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
   },
   value: {
     color: colors.text,
-    fontSize: 15,
+    fontSize: 16,
+    fontWeight: '600',
   },
   placeholder: {
     color: colors.muted,
+    fontWeight: '400',
+  },
+  iconContainer: {
+    marginLeft: spacing.sm,
+    backgroundColor: '#F2F4F8',
+    padding: 6,
+    borderRadius: 8,
+  },
+  icon: {
+    fontSize: 16,
   },
   modalOverlay: {
     flex: 1,
     justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-  },
-  modalBackdrop: {
-    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
   },
   modalContent: {
     backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     paddingBottom: 34,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 10,
   },
   modalHeader: {
     flexDirection: 'row',
@@ -163,7 +206,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
     borderBottomWidth: 1,
-    borderBottomColor: '#E6EAF2',
+    borderBottomColor: '#F2F4F8',
+  },
+  headerButton: {
+    padding: 8,
   },
   modalTitle: {
     fontSize: 17,
@@ -172,11 +218,15 @@ const styles = StyleSheet.create({
   },
   modalCancelText: {
     fontSize: 16,
-    color: colors.muted,
+    color: colors.textSecondary,
   },
   modalConfirmText: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
     color: colors.primary,
   },
+  pickerContainer: {
+    paddingTop: 10,
+    alignItems: 'center',
+  }
 });

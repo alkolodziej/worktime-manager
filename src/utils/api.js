@@ -59,8 +59,13 @@ async function http(path, { method = 'GET', body } = {}) {
   }
 }
 
-export async function apiLogin(username) {
-  return http('/login', { method: 'POST', body: { username } });
+export async function apiLogin(username, password) {
+  // If password is provided, send it. If not (legacy/mock logic), body handles it.
+  return http('/login', { method: 'POST', body: { username, password } });
+}
+
+export async function apiRegister(username, password, name) {
+  return http('/register', { method: 'POST', body: { username, password, name } });
 }
 
 export async function apiGetShifts({ from, to, assignedUserId } = {}) {
@@ -245,4 +250,8 @@ export async function apiRemovePosition(userId, positionId) {
 
 export async function apiGetEmployeesByPosition(positionId) {
   return http(`/positions/${positionId}/employees`);
+}
+
+export async function apiGetEarningsReport(userId, date) {
+  return http(`/reports/earnings?userId=${userId}&date=${date}`);
 }

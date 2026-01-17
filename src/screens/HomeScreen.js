@@ -9,8 +9,8 @@ import Badge from '../components/Badge';
 import Toast from '../components/Toast';
 import { LocationCheckModal } from '../components/LocationCheckModal';
 import { Ionicons } from '@expo/vector-icons';
-import { formatTimeRange, minutesToHhMm } from '../utils/format';
-import { apiGetShifts, apiClockIn, apiClockOut, apiGetTimesheets } from '../utils/api';
+import { formatTimeRange, minutesToHhMm, parseTimeMinutes } from '../utils/format';
+import { apiGetShifts, apiClockIn, apiClockOut, apiGetTimesheets, apiGetActiveTimesheet } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
@@ -19,14 +19,25 @@ import {
   isWithinRestaurant,
 } from '../utils/location';
 
+import { useNavigation } from '@react-navigation/native';
+
 export default function HomeScreen() {
   const { user } = useAuth();
-  const today = new Date();
-  const todayStr = today.toLocaleDateString('pl-PL');
+  const navigation = useNavigation();
   const [shifts, setShifts] = React.useState([]);
   const [timesheets, setTimesheets] = React.useState([]);
   const [showShiftModal, setShowShiftModal] = React.useState(false);
   const [selectedShift, setSelectedShift] = React.useState(null);
+
+  // Hoisted state
+  const [activeStart, setActiveStart] = React.useState(null); 
+  const [currentTime, setCurrentTime] = React.useState(new Date()); 
+  const [isCheckingLocation, setIsCheckingLocation] = React.useState(false);
+  const [locationToast, setLocationToast] = React.useState(null);
+  
+  const [locationStatus, setLocationStatus] = React.useState('loading'); 
+  const [locationMessage, setLocationMessage] = React.useState('');
+  const [locationDetails, setLocationDetails] = React.useState(null);
 
   React.useEffect(() => {
     if (!user?.id) return;
@@ -52,62 +63,126 @@ export default function HomeScreen() {
       }
     })();
   }, [user?.id]);
-  const todaysShift = shifts.find(s => s && s.date && new Date(s.date).toLocaleDateString('pl-PL') === todayStr);
-  const nextShift = todaysShift || shifts.find(s => s && s.date && new Date(s.date) > today) || shifts[0];
+  const now = currentTime;
+  
+  // Logic to find Today's shift more robustly
+  const todaysShift = React.useMemo(() => {
+    const todayYMD = now.toISOString().split('T')[0];
+    return shifts.find(s => {
+      // Handle both formats if necessary, but assuming ISO from backend
+      if (!s.date) return false;
+      // Convert shift date to YYYY-MM-DD in LOCAL time (or just simple slice if backend is UTC-normalized to date)
+      // Safest: Create date object, get local ISO slice
+      const d = new Date(s.date);
+      // Determine if 'd' falls on the same calendar day as 'now'
+      return d.getDate() === now.getDate() && 
+             d.getMonth() === now.getMonth() && 
+             d.getFullYear() === now.getFullYear();
+    });
+  }, [shifts, now]);
 
-  // Calculate week summary from timesheets
+  const nextShift = React.useMemo(() => {
+    if (todaysShift) return todaysShift;
+    // Find first future shift
+    // Sort shifts first to be safe
+    const sorted = [...shifts].sort((a, b) => new Date(a.date) - new Date(b.date));
+    return sorted.find(s => {
+      if (!s.date) return false;
+      const sDate = new Date(s.date);
+      // Check if date is in future (tomorrow+)
+      // If it is today, it would be caught by todaysShift unless it's later today? 
+      // Actually todaysShift catches EVERYTHING for today.
+      // So here we look for date > today (roughly)
+      return sDate > now;
+    }) || shifts[0]; // Fallback
+  }, [shifts, todaysShift, now]);
+
+  // Calculate week summary from timesheets (Mon-Sun)
   const weekSummary = React.useMemo(() => {
-    const start = new Date(today);
-    start.setHours(0,0,0,0);
-    const end = new Date(start);
-    end.setDate(start.getDate() + 7);
+    // Info: "Start of week" (Monday)
+    const current = new Date(now);
+    const day = current.getDay(); // 0=Sun, 1=Mon
+    const diff = current.getDate() - day + (day === 0 ? -6 : 1); // adjust when day is sunday
+    const monday = new Date(current.setDate(diff));
+    monday.setHours(0, 0, 0, 0);
+
+    const nextMonday = new Date(monday);
+    nextMonday.setDate(monday.getDate() + 7);
 
     // Calculate worked minutes from timesheets
     let workedMinutes = 0;
     timesheets.forEach(timesheet => {
       const clockIn = new Date(timesheet.clockIn);
-      const clockOut = timesheet.clockOut ? new Date(timesheet.clockOut) : null;
-      if (clockIn >= start && clockIn < end && clockOut) {
-        workedMinutes += (clockOut - clockIn) / (1000 * 60); // Convert ms to minutes
+      // Valid if clockIn is within this week
+      if (clockIn >= monday && clockIn < nextMonday) {
+         if (timesheet.clockOut) {
+            const clockOut = new Date(timesheet.clockOut);
+            workedMinutes += (clockOut - clockIn) / (1000 * 60);
+         } else {
+            // Option: Count current active session up to now?
+            // workedMinutes += (now - clockIn) / (1000 * 60);
+         }
       }
     });
 
-    // Calculate planned minutes from shifts
+    // Calculate planned minutes from shifts (This Week)
     let plannedMinutes = 0;
     shifts.forEach(shift => {
       if (!shift?.date) return;
       const shiftDate = new Date(shift.date);
-      if (shiftDate >= start && shiftDate < end) {
-        const [startHour, startMin] = shift.start.split(':').map(x => parseInt(x, 10));
-        const [endHour, endMin] = shift.end.split(':').map(x => parseInt(x, 10));
-        let minutes = (endHour * 60 + endMin) - (startHour * 60 + startMin);
-        if (minutes < 0) minutes += 24 * 60; // Handle overnight shifts
+      if (shiftDate >= monday && shiftDate < nextMonday) {
+        const startMins = parseTimeMinutes(shift.start);
+        const endMins = parseTimeMinutes(shift.end);
+        let minutes = endMins - startMins;
+        if (minutes < 0) minutes += 24 * 60; 
         plannedMinutes += minutes;
       }
     });
+    
+    // Default goal (e.g. 40h)
+    const targetMinutes = 40 * 60;
 
     return {
-      workedMinutes,
+      workedMinutes: Math.floor(workedMinutes),
       plannedMinutes,
-      targetMinutes: 40 * 60, // 40 hours per week
+      targetMinutes,
     };
-  }, [shifts, timesheets, todayStr]);
+  }, [shifts, timesheets, now]);
 
-  const [activeStart, setActiveStart] = React.useState(null); // Date | null
-  const [currentTime, setCurrentTime] = React.useState(new Date()); // Current time for timer updates
-  const [isCheckingLocation, setIsCheckingLocation] = React.useState(false);
-  const [locationToast, setLocationToast] = React.useState(null);
-  const [locationCheckStep, setLocationCheckStep] = React.useState('permissions'); // Tracking which step
-  const [locationCheckError, setLocationCheckError] = React.useState(null);
+  const ACTIVE_SHIFT_KEY = `WTM_ACTIVE_SHIFT_START_${user?.id}`;
 
   React.useEffect(() => {
+    if (!user?.id) return;
     (async () => {
       try {
-        const raw = await AsyncStorage.getItem('WTM_ACTIVE_SHIFT_START');
+        // Source of truth: Backend
+        // If we are online, check if we have an active timesheet
+        let backendActive = null;
+        try {
+          const res = await apiGetActiveTimesheet(user.id);
+          if (res && res.clockIn) backendActive = res;
+        } catch (e) {
+          // 404 means no active timesheet
+        }
+
+        if (backendActive) {
+          const startTime = new Date(backendActive.clockIn);
+          setActiveStart(startTime);
+          await AsyncStorage.setItem(ACTIVE_SHIFT_KEY, String(startTime.getTime()));
+        } else {
+          // Backend says not working. Trust it? 
+          // If we are offline, we might rely on Storage, but if we just got 404 from backend it means we are online.
+          // So we should probably clear local state to sync.
+          setActiveStart(null);
+          await AsyncStorage.removeItem(ACTIVE_SHIFT_KEY);
+        }
+      } catch (err) {
+        // Network error probably. Fallback to local storage.
+        const raw = await AsyncStorage.getItem(ACTIVE_SHIFT_KEY);
         if (raw) setActiveStart(new Date(parseInt(raw, 10)));
-      } catch {}
+      }
     })();
-  }, []);
+  }, [user?.id]);
 
   React.useEffect(() => {
     // Update current time every second to refresh timer
@@ -120,78 +195,47 @@ export default function HomeScreen() {
   const isClockedIn = !!activeStart;
 
   const handleClockIn = async () => {
+    setIsCheckingLocation(true);
+    setLocationStatus('loading');
+    setLocationMessage('Weryfikacja uprawnień GPS...');
+    setLocationDetails(null);
+
     try {
-      setIsCheckingLocation(true);
-      setLocationCheckStep('permissions');
-      setLocationCheckError(null);
-      
       // Step 1: Request location permissions
-      try {
-        await requestLocationPermissions();
-        await new Promise(resolve => setTimeout(resolve, 600)); // Artificial delay
-        setLocationCheckStep('userLocation');
-      } catch (err) {
-        setLocationCheckError(err.message);
-        await new Promise(resolve => setTimeout(resolve, 1500)); // Show error
-        return;
-      }
-
-      // Step 2: Get current location
-      let userLocation;
-      try {
-        userLocation = await getCurrentLocation();
-        await new Promise(resolve => setTimeout(resolve, 800)); // Artificial delay
-        setLocationCheckStep('restaurantLocation');
-      } catch (err) {
-        setLocationCheckError('Nie udało się pobrać Twojej lokalizacji');
-        await new Promise(resolve => setTimeout(resolve, 1500)); // Show error
-        return;
-      }
-
-      // Step 3: Load restaurant location
-      await new Promise(resolve => setTimeout(resolve, 700)); // Artificial delay
-      setLocationCheckStep('calculating');
+      await requestLocationPermissions();
+      setLocationMessage('Pobieranie Twojej lokalizacji...');
       
-      // Step 4: Check if user is within restaurant
-      let locationCheck;
-      try {
-        locationCheck = await isWithinRestaurant(userLocation);
-        await new Promise(resolve => setTimeout(resolve, 600)); // Artificial delay
-        setLocationCheckStep('verification');
-      } catch (err) {
-        setLocationCheckError('Błąd porównania lokalizacji');
-        await new Promise(resolve => setTimeout(resolve, 1500)); // Show error
-        return;
-      }
+      // Step 2: Get current location
+      const userLocation = await getCurrentLocation();
+      setLocationMessage('Weryfikacja miejsca pracy...');
+      setLocationDetails({ accuracy: userLocation.accuracy });
 
-      // Add delay to show verification step
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Step 3: Check if user is within restaurant
+      const locationCheck = await isWithinRestaurant(userLocation);
+      
+      setLocationDetails(prev => ({ 
+        ...prev, 
+        distance: locationCheck.distance,
+        allowedRadius: locationCheck.radius
+      }));
       
       if (!locationCheck.isWithin) {
-        setIsCheckingLocation(false);
-        Alert.alert(
-          'Poza restauracją',
-          `Jesteś ${locationCheck.distance}m od restauracji. Podejdź bliżej (dozwolony promień: ${locationCheck.radius}m).`,
-          [{ text: 'OK' }]
-        );
-        setLocationToast({
-          message: `❌ Lokalizacja: ${locationCheck.distance}m od restauracji`,
-          type: 'danger',
-        });
+        setLocationStatus('error');
+        // Do not close automatically on error
         return;
       }
 
-      setLocationToast({
-        message: `✓ Lokalizacja potwierdzona (${locationCheck.distance}m)`,
-        type: 'success',
-      });
-
+      // Success
+      setLocationStatus('success');
+      setLocationMessage('');
+      
+      // Persist state
       const now = Date.now();
       setActiveStart(new Date(now));
-      await AsyncStorage.setItem('WTM_ACTIVE_SHIFT_START', String(now));
+      await AsyncStorage.setItem(ACTIVE_SHIFT_KEY, String(now));
       if (user?.id) {
-        try {
-          await apiClockIn({
+        // Fire and forget (or async without blocking UI too long)
+        apiClockIn({
             userId: user.id,
             shiftId: nextShift?.id,
             timestamp: now,
@@ -200,23 +244,33 @@ export default function HomeScreen() {
               longitude: userLocation.longitude,
               accuracy: userLocation.accuracy,
             },
-          });
-        } catch (err) {
-          console.error('Clock in error:', err);
-        }
+        }).catch(err => {
+          // If backend says we are already clocked in, it's fine. Ignore.
+          if (err.message && err.message.includes('already clocked in')) {
+            console.log('Already clocked in (sync)');
+            return;
+          }
+          console.error('BG ClockIn failed', err);
+          // Optional: Revert UI state if it was a real network error?
+          // For now, let's keep optimistic UI but shows toast if critical.
+        });
       }
+      
+      // Auto-close success modal after short delay
+      setTimeout(() => {
+        setIsCheckingLocation(false);
+      }, 1800);
+
     } catch (error) {
-      setLocationCheckError(error.message || 'Nie udało się pobrać lokalizacji');
-      console.error('Clock in error:', error);
-    } finally {
-      setIsCheckingLocation(false);
+      setLocationStatus('error');
+      setLocationMessage(error.message || 'Nie udało się pobrać lokalizacji');
     }
   };
 
   const handleClockOut = async () => {
     const now = Date.now();
     setActiveStart(null);
-    await AsyncStorage.removeItem('WTM_ACTIVE_SHIFT_START');
+    await AsyncStorage.removeItem(ACTIVE_SHIFT_KEY);
     if (user?.id) {
       try { await apiClockOut({ userId: user.id, timestamp: now }); } catch {}
     }
@@ -224,7 +278,7 @@ export default function HomeScreen() {
 
   const startDate = nextShift ? parseShiftTime(nextShift.date, nextShift.start) : null;
   const endDate = nextShift ? parseShiftTime(nextShift.date, nextShift.end) : null;
-  const now = currentTime; // Use updated currentTime from state
+  // Used globally: const now = currentTime; 
   const beforeStart = startDate ? now < startDate : false;
   const duringShift = startDate && endDate ? now >= startDate && now <= endDate : false;
 
@@ -236,8 +290,11 @@ export default function HomeScreen() {
       {/* Location Check Modal */}
       <LocationCheckModal
         visible={isCheckingLocation}
-        currentStep={locationCheckStep}
-        error={locationCheckError}
+        status={locationStatus}
+        message={locationMessage}
+        technicalDetails={locationDetails}
+        onRetry={handleClockIn}
+        onClose={() => setIsCheckingLocation(false)}
       />
 
       {locationToast && (
@@ -264,16 +321,21 @@ export default function HomeScreen() {
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <View>
               <Text style={styles.shiftText}>{formatTimeRange(nextShift.start, nextShift.end)}</Text>
+              {!todaysShift && (
+                 <Text style={{ fontSize: 13, color: colors.primary, fontWeight: '500', marginBottom: 2 }}>
+                    {new Date(nextShift.date).toLocaleDateString('pl-PL', { weekday: 'short', day: 'numeric', month: 'short' })}
+                 </Text>
+              )}
               <Text style={styles.metaText}>{nextShift.location} • {nextShift.role}</Text>
             </View>
             <View>
-              <Badge label={todaysShift ? 'Dziś' : 'Jutro/Przyszłe'} tone={todaysShift ? 'success' : 'info'} />
+              <Badge label={todaysShift ? 'Dziś' : 'Nadchodząca'} tone={todaysShift ? 'success' : 'info'} />
               <Ionicons name="chevron-forward" size={20} color={colors.muted} style={{ marginTop: spacing.sm }} />
             </View>
           </View>
         </TouchableOpacity>
         )}
-        {nextShift && beforeStart && (
+        {nextShift && beforeStart && countdownLabel && (
           <Text style={styles.countdown}>Start za {countdownLabel}</Text>
         )}
         {nextShift && !beforeStart && duringShift && !isClockedIn && (
@@ -315,32 +377,34 @@ export default function HomeScreen() {
         </View>
       </Card>
 
-      <SectionHeader title="Podsumowanie tygodnia" />
+      <SectionHeader title="Podsumowanie tygodnia (pon-nd)" />
       <Card style={{ marginBottom: spacing.lg }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.sm }}>
           <Text style={styles.summaryTitle}>Przepracowano</Text>
-          <Text style={styles.summaryTitle}>{minutesToHhMm(weekSummary.workedMinutes)}</Text>
+          <Text style={styles.summaryHours}>{minutesToHhMm(weekSummary.workedMinutes)}</Text>
         </View>
-        <ProgressBar value={weekSummary.workedMinutes / weekSummary.targetMinutes} />
-        <Text style={styles.summaryHint}>Cel: {minutesToHhMm(weekSummary.targetMinutes)} (Plan: {minutesToHhMm(weekSummary.plannedMinutes)})</Text>
+        <ProgressBar value={weekSummary.workedMinutes / (weekSummary.targetMinutes || 1)} />
+        <Text style={styles.summaryHint}>
+           Zaplanowane: {minutesToHhMm(weekSummary.plannedMinutes)} • Cel: {minutesToHhMm(weekSummary.targetMinutes)}
+        </Text>
       </Card>
 
       <SectionHeader title="Szybkie akcje" />
       <View style={styles.quickGrid}>
         <QuickAction 
-          icon="time-outline" 
-          label="Spóźnię się" 
-          onPress={() => Alert.alert('Spóźnienie', 'Funkcja w przygotowaniu')}
+          icon="calendar-number-outline" 
+          label="Dostępność" 
+          onPress={() => navigation.navigate('Availability')}
         />
         <QuickAction 
           icon="swap-horizontal-outline" 
-          label="Zamiana zmiany" 
-          onPress={() => Alert.alert('Zamiana', 'Funkcja w przygotowaniu')}
+          label="Giełda Zmian" 
+          onPress={() => navigation.navigate('Swaps')}
         />
         <QuickAction 
-          icon="document-text-outline" 
-          label="Zobacz regulamin" 
-          onPress={() => Alert.alert('Regulamin', 'Funkcja w przygotowaniu')}
+          icon="airplane-outline" 
+          label="Zgłoś urlop" 
+          onPress={() => Alert.alert('Urlop', 'Funkcja w przygotowaniu')}
         />
       </View>
 
@@ -417,15 +481,47 @@ function QuickAction({ icon, label, onPress, disabled }) {
   );
 }
 
-function parseShiftTime(dateObj, hhmm) {
-  const [h, m] = hhmm.split(':').map((x) => parseInt(x, 10));
-  const d = new Date(dateObj);
-  d.setHours(h, m, 0, 0);
+function parseShiftTime(dateObj, timeStr) {
+  let h = 0, m = 0;
+  
+  if (typeof timeStr === 'string' && timeStr.includes('T')) {
+      // It's an ISO string, e.g. "2026-01-16T13:00:00.000Z"
+      const dTime = new Date(timeStr);
+      h = dTime.getHours();
+      m = dTime.getMinutes();
+  } else if (typeof timeStr === 'string' && timeStr.includes(':')) {
+      // It's "HH:MM"
+      const parts = timeStr.split(':').map(x => parseInt(x, 10));
+      h = parts[0];
+      m = parts[1];
+  } else {
+      // Fallback
+      return new Date(dateObj); // Shouldn't happen if data is clean
+  }
+
+  const sDate = new Date(dateObj); // This is usually UTC 00:00 or similar
+  
+  // Create local date
+  const d = new Date(
+    sDate.getFullYear(),
+    sDate.getMonth(),
+    sDate.getDate(),
+    h,
+    m,
+    0,
+    0
+  );
   return d;
 }
 
 function formatCountdown(target, now) {
   const diff = Math.max(0, target.getTime() - now.getTime());
+  
+  // If > 24 hours, don't show countdown
+  if (diff > 24 * 60 * 60 * 1000) {
+      return null;
+  }
+
   const s = Math.floor(diff / 1000);
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);

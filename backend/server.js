@@ -3,6 +3,7 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 const express = require('express');
 const cors = require('cors');
+const { parseISO, differenceInMinutes, startOfMonth, endOfMonth, addMinutes } = require('date-fns');
 
 const PORT = Number(process.env.PORT || process.env.BACKEND_PORT || 8000);
 const HOST = process.env.HOST || process.env.BACKEND_HOST || '0.0.0.0';
@@ -82,10 +83,65 @@ app.get('/company/location', (req, res) => {
 });
 
 app.post('/login', (req, res) => {
-  const { username } = req.body || {};
+  const { username, password } = req.body || {};
   if (!username) return res.status(400).json({ error: 'username required' });
-  const user = findOrCreateUser(username);
+  
+  const db = readDb();
+  const user = db.users.find(u => u.username === username);
+
+  if (!user) {
+    return res.status(401).json({ error: 'Nieprawidłowa nazwa użytkownika lub hasło' });
+  }
+
+  // If user has a password set, verify it
+  if (user.password && user.password !== password) {
+    return res.status(401).json({ error: 'Nieprawidłowa nazwa użytkownika lub hasło' });
+  }
+
+  // If user has NO password (legacy), we might allow access or require registration
+  // For now, if we want strict password enforcement:
+  if (!user.password && password) {
+     // Optional: We could update the password here if we wanted "claim on first login"
+     // But strictly, we should probably fail or assume legacy users are insecure.
+     // Let's allow legacy users for now to avoid breaking everyone, but
+     // new users (via register) will have passwords.
+  }
+
   res.json(user);
+});
+
+app.post('/register', (req, res) => {
+  const { username, password, name } = req.body || {};
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Wymagane nazwa użytkownika i hasło.' });
+  }
+
+  const db = readDb();
+  if (db.users.find(u => u.username === username)) {
+    return res.status(409).json({ error: 'Taki użytkownik już istnieje.' });
+  }
+
+  const id = String(Date.now());
+  const newUser = {
+    id,
+    username,
+    password,
+    name: name || username,
+    isEmployer: false,
+    phone: '',
+    avatar: null,
+    hourlyRate: 30.5,
+    positions: [], // Positions will be set in onboarding
+    preferences: {
+      notificationsEnabled: true,
+      remindersEnabled: true,
+      reminderMinutes: 30,
+    },
+  };
+
+  db.users.push(newUser);
+  writeDb(db);
+  res.json(newUser);
 });
 
 // Filter users by positions and availability (for shift assignment)
@@ -351,29 +407,46 @@ app.post('/swaps/:id/accept', (req, res) => {
   const { actorUserId } = req.body || {};
   const db = readDb();
   
-  // Validate: can only accept if you're either requester or target
   const swap = (db.swaps || []).find(s => s.id === id);
   if (!swap) return res.status(404).json({ error: 'swap not found' });
-  
-  const isRequester = swap.requesterId === actorUserId;
-  const isTarget = swap.targetUserId === actorUserId;
-  if (!isRequester && !isTarget && actorUserId) {
-    return res.status(403).json({ error: 'Only requester or target can accept' });
+  const shift = db.shifts.find(s => s.id === swap.shiftId);
+  if (!shift) return res.status(404).json({ error: 'shift not found' });
+
+  // Logic to determine if actor is allowed to accept
+  // Case 1: Open Market (Giveaway) -> targetUserId is null. Anyone (except requester) can accept.
+  if (!swap.targetUserId) {
+    if (swap.requesterId === actorUserId) {
+      return res.status(403).json({ error: 'Cannot accept your own open swap' });
+    }
+    // Actor becomes the target
+    swap.targetUserId = actorUserId;
+  } else {
+    // Case 2: Directed Swap. Only target can accept.
+    // (Or logic could differ, but let's assume target must accept)
+    if (swap.targetUserId !== actorUserId && swap.requesterId !== actorUserId) {
+        // Allow self-accept? No, usually not.
+        return res.status(403).json({ error: 'Not authorized to accept this swap' });
+    }
   }
   
   // Update swap status
-  const result = updateSwapStatus(id, 'accepted');
-  if (result.error) return res.status(404).json({ error: result.error });
+  swap.status = 'accepted';
+  swap.updatedAt = new Date().toISOString();
   
-  // **IMPORTANT**: Reassign shift to the requester (who wanted the swap)
-  const updatedSwap = (db.swaps || []).find(s => s.id === id);
-  const shift = db.shifts.find(s => s.id === updatedSwap.shiftId);
-  if (shift && updatedSwap) {
-    shift.assignedUserId = updatedSwap.requesterId;
-    writeDb(db);
+  // REASSIGNMENT LOGIC
+  // If Requester was the owner (Giveaway) -> New Owner is Target (Actor)
+  // If Requester was NOT the owner (Take Request) -> New Owner is Requester
+  
+  if (shift.assignedUserId === swap.requesterId) {
+      // Giveaway
+      shift.assignedUserId = swap.targetUserId;
+  } else {
+      // Take Request (someone asked for it, and presumably owner accepted)
+      shift.assignedUserId = swap.requesterId;
   }
   
-  res.json(updatedSwap);
+  writeDb(db);
+  res.json(swap);
 });
 
 app.post('/swaps/:id/reject', (req, res) => {
@@ -431,13 +504,13 @@ app.patch('/users/:id', (req, res) => {
   
   // Check authorization for sensitive fields (only employers can modify hourly rates of others)
   if (updates.hourlyRate && req.params.id !== requestingUser?.id) {
-    if (requestingUser?.role !== 'Pracodawca') {
+    if (!requestingUser?.isEmployer) {
       return res.status(403).json({ error: 'Only employers can modify employee rates' });
     }
   }
   
   // Whitelist fields that can be updated
-  const allowed = ['name', 'phone', 'avatar', 'photoUri', 'photoBase64', 'preferences', 'role', 'hourlyRate'];
+  const allowed = ['name', 'phone', 'avatar', 'photoUri', 'photoBase64', 'preferences', 'isEmployer', 'hourlyRate', 'monthlyGoal'];
   for (const field of allowed) {
     if (field in updates) {
       // Validate hourlyRate minimum 30.5 zł/h
@@ -539,7 +612,7 @@ app.get('/context/:userId', (req, res) => {
 
   // Get user's shifts (assigned + unassigned if admin)
   let userShifts = db.shifts || [];
-  if (user.role !== 'Pracodawca') {
+  if (!user.isEmployer) {
     userShifts = userShifts.filter(s => s.assignedUserId === userId);
   }
 
@@ -639,7 +712,7 @@ app.post('/employer/employees/:userId/rate', (req, res) => {
 
   const db = readDb();
   const employer = db.users.find(u => u.id === employerId);
-  if (!employer || employer.role !== 'Pracodawca') {
+  if (!employer || !employer.isEmployer) {
     return res.status(403).json({ error: 'Only employer can set rates' });
   }
 
@@ -657,6 +730,96 @@ app.post('/employer/employees/:userId/rate', (req, res) => {
     message: 'Rate updated',
     userId: employee.id,
     hourlyRate: employee.hourlyRate,
+  });
+});
+
+// Helper to merge overlapping intervals and count minutes
+function calculateNonOverlappingMinutes(intervals) {
+  if (intervals.length === 0) return 0;
+  // 1. Sort by start time
+  const sorted = [...intervals].sort((a, b) => a.start - b.start);
+  // 2. Merge
+  const merged = [];
+  let current = sorted[0];
+  for (let i = 1; i < sorted.length; i++) {
+    const next = sorted[i];
+    if (next.start < current.end) {
+      // Overlap! Extend current end if needed
+      if (next.end > current.end) {
+        current.end = next.end;
+      }
+    } else {
+      merged.push(current);
+      current = next;
+    }
+  }
+  merged.push(current);
+  // 3. Sum duration
+  let totalMinutes = 0;
+  for (const interval of merged) {
+    const diff = differenceInMinutes(interval.end, interval.start);
+    totalMinutes += Math.max(0, diff);
+  }
+  return totalMinutes;
+}
+
+app.get('/reports/earnings', (req, res) => {
+  const { userId, date } = req.query; 
+  if (!userId || !date) return res.status(400).json({ error: 'Missing userId or date' });
+  
+  const db = readDb();
+  const user = db.users.find(u => u.id === userId);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+
+  const targetDate = parseISO(date); 
+  const startOfCurrentMonth = startOfMonth(targetDate);
+  const endOfCurrentMonth = endOfMonth(targetDate);
+  const now = new Date(); // Server time
+
+  // 1. Worked Minutes (Timesheets)
+  const validTimesheets = (db.timesheets || []).filter(t => {
+    if (t.userId !== userId || !t.clockOut) return false;
+    const d = parseISO(t.clockIn);
+    return d >= startOfCurrentMonth && d <= endOfCurrentMonth;
+  });
+
+  const workedIntervals = validTimesheets.map(t => ({
+    start: parseISO(t.clockIn),
+    end: parseISO(t.clockOut)
+  }));
+  const workedMinutes = calculateNonOverlappingMinutes(workedIntervals);
+
+  // 2. Planned Minutes (Future Shifts)
+  const userShifts = (db.shifts || []).filter(s => {
+     if (s.assignedUserId !== userId) return false;
+     const sDate = parseISO(s.date);
+     return sDate >= startOfCurrentMonth && sDate <= endOfCurrentMonth;
+  });
+
+  const plannedIntervals = [];
+  userShifts.forEach(s => {
+      const dayStr = s.date.split('T')[0];
+      const startDt = new Date(`${dayStr}T${s.start}:00`);
+      let endDt = new Date(`${dayStr}T${s.end}:00`);
+      if (endDt < startDt) endDt = addMinutes(endDt, 24 * 60);
+
+      // Only count if it's in the future relative to NOW
+      if (startDt > now) {
+          plannedIntervals.push({ start: startDt, end: endDt });
+      }
+  });
+  const plannedMinutes = calculateNonOverlappingMinutes(plannedIntervals);
+
+  const hourlyRate = user.hourlyRate || 0;
+  const goalMinutes = (user.monthlyGoal || 160) * 60;
+
+  res.json({
+      monthName: targetDate.toLocaleDateString('pl-PL', { month: 'long', year: 'numeric' }),
+      workedMinutes,
+      plannedMinutes,
+      totalMinutes: workedMinutes + plannedMinutes,
+      hourlyRate,
+      targetMinutes: goalMinutes
   });
 });
 

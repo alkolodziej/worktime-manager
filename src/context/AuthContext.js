@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { apiLogin } from '../utils/api';
+import { apiLogin, apiGetUserProfile } from '../utils/api';
 
 const STORAGE_KEY = 'WTM_AUTH_USER';
 
@@ -27,9 +27,9 @@ export function AuthProvider({ children }) {
     })();
   }, []);
 
-  const login = async ({ username, avatarUri, viewMode }) => {
+  const login = async ({ username, password, avatarUri, viewMode }) => {
     try {
-      const backendUser = await apiLogin(username);
+      const backendUser = await apiLogin(username, password);
       const nextUser = {
         id: backendUser.id,
         username: backendUser.username,
@@ -37,24 +37,33 @@ export function AuthProvider({ children }) {
         isEmployer: backendUser.isEmployer, // Rola z backendu
         viewMode: viewMode || (backendUser.isEmployer ? 'employer' : 'employee'), // Tryb widoku
         avatarUri: avatarUri || null,
+        positions: backendUser.positions || [],
       };
       setUser(nextUser);
       // Store session indefinitely (no expiry) in AsyncStorage
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(nextUser));
+      return nextUser;
     } catch (e) {
-      // Fallback to local-only session if backend unavailable
-      // This allows offline mode: user can still use app with local data
-      const nextUser = { 
-        id: username, // Use username as temp ID when offline
-        username, 
-        name: username, 
-        isEmployer: false,
-        viewMode: viewMode || 'employee',
-        avatarUri: avatarUri || null,
-        isOffline: true, // Flag to indicate offline session
+      console.error('Login error:', e);
+      throw e;
+    }
+  };
+
+  const refreshUser = async () => {
+    if (!user?.id) return;
+    try {
+      const updated = await apiGetUserProfile(user.id);
+      const nextUser = {
+        ...user,
+        name: updated.name,
+        phone: updated.phone,
+        positions: updated.positions || [],
+        avatarUri: updated.photoUri || updated.avatar || user.avatarUri,
       };
       setUser(nextUser);
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(nextUser));
+    } catch (e) {
+      console.warn('Refresh user failed', e);
     }
   };
 
@@ -69,7 +78,7 @@ export function AuthProvider({ children }) {
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(nextUser));
   };
 
-  const value = useMemo(() => ({ user, loading, login, logout, updatePhoto }), [user, loading]);
+  const value = useMemo(() => ({ user, loading, login, logout, updatePhoto, refreshUser }), [user, loading]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

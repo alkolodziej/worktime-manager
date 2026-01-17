@@ -1,178 +1,326 @@
-import React from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Keyboard, Alert } from 'react-native';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Keyboard, ActivityIndicator, ScrollView } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import Screen from '../components/Screen';
 import Card from '../components/Card';
 import ProgressBar from '../components/ProgressBar';
 import { colors, spacing, radius } from '../utils/theme';
 import { minutesToHhMm } from '../utils/format';
-import { apiGetShifts, apiGetTimesheets, apiGetUserProfile, apiUpdateUserProfile } from '../utils/api';
+import { apiGetEarningsReport, apiGetUserProfile, apiUpdateUserProfile } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import { showToast } from '../components/Toast';
 
 export default function EarningsCalculatorScreen() {
   const { user } = useAuth();
-  const [shifts, setShifts] = React.useState([]);
-  const [timesheets, setTimesheets] = React.useState([]);
-  const [rate, setRate] = React.useState('30.5');
-  const [loading, setLoading] = React.useState(false);
+  
+  const [report, setReport] = useState(null);
+  const [rate, setRate] = useState('30.5'); // Default minimal hourly rate
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  // Refresh data when screen is focused
+  // Focus effect to reload data
   useFocusEffect(
-    React.useCallback(() => {
+    useCallback(() => {
       loadData();
     }, [user?.id])
   );
 
-  const loadData = React.useCallback(async () => {
+  const loadData = async () => {
     if (!user?.id) return;
     setLoading(true);
     try {
-      // Load shifts
-      const shiftsList = await apiGetShifts({});
-      setShifts(shiftsList);
+      const today = new Date().toISOString().split('T')[0];
+      const [data, profile] = await Promise.all([
+        apiGetEarningsReport(user.id, today),
+        apiGetUserProfile(user.id)
+      ]);
 
-      // Load timesheets
-      const timesheetsList = await apiGetTimesheets({ userId: user.id });
-      setTimesheets(timesheetsList);
-
-      // Load user profile with hourly rate
-      const profile = await apiGetUserProfile(user.id);
-      setRate(String(profile.hourlyRate || 30.5));
+      setReport(data);
+      if (profile.hourlyRate) {
+        setRate(String(profile.hourlyRate));
+      }
     } catch (error) {
       console.error('Failed to load earnings data:', error);
       showToast('Nie udało się załadować danych', 'error');
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
-
-  const summary = React.useMemo(() => {
-    const today = new Date();
-    const start = new Date(today);
-    start.setHours(0,0,0,0);
-    const end = new Date(start);
-    end.setDate(start.getDate() + 7);
-
-    // Calculate worked minutes from timesheets
-    let workedMinutes = 0;
-    timesheets.forEach(timesheet => {
-      const clockIn = new Date(timesheet.clockIn);
-      const clockOut = timesheet.clockOut ? new Date(timesheet.clockOut) : null;
-      if (clockIn >= start && clockIn < end && clockOut) {
-        workedMinutes += (clockOut - clockIn) / (1000 * 60); // Convert ms to minutes
-      }
-    });
-
-    // Calculate planned minutes from shifts
-    let plannedMinutes = 0;
-    shifts.forEach(shift => {
-      if (!shift?.date) return;
-      const shiftDate = new Date(shift.date);
-      if (shiftDate >= start && shiftDate < end) {
-        const [startHour, startMin] = shift.start.split(':').map(x => parseInt(x, 10));
-        const [endHour, endMin] = shift.end.split(':').map(x => parseInt(x, 10));
-        let minutes = (endHour * 60 + endMin) - (startHour * 60 + startMin);
-        if (minutes < 0) minutes += 24 * 60; // Handle overnight shifts
-        plannedMinutes += minutes;
-      }
-    });
-
-    return {
-      workedMinutes,
-      plannedMinutes,
-      targetMinutes: 40 * 60, // 40 hours per week
-    };
-  }, [shifts, timesheets]);
+  };
 
   const saveRate = async () => {
-    const rateNum = parseFloat(rate);
+    Keyboard.dismiss();
+    const rateNum = parseFloat(rate.replace(',', '.'));
     if (isNaN(rateNum) || rateNum < 30.5) {
-      showToast('Stawka musi być co najmniej 30.5 zł/h', 'error');
-      setRate(String(30.5));
+      showToast('Minimalna stawka to 30.50 zł/h', 'error');
+      setRate('30.5');
       return;
     }
+    
+    setSaving(true);
     try {
       await apiUpdateUserProfile(user.id, { hourlyRate: rateNum });
-      showToast('Stawka zapisana', 'success');
-      Keyboard.dismiss();
+      showToast('Stawka zaktualizowana', 'success');
+      // format to 2 decimals
+      setRate(rateNum.toFixed(2)); 
     } catch (error) {
-      showToast('Nie udało się zapisać stawki', 'error');
+      showToast('Błąd zapisu', 'error');
+    } finally {
+      setSaving(false);
     }
   };
 
-  const workedHours = summary.workedMinutes / 60;
-  const hourly = parseFloat(rate) || 30.5;
-  const earnings = (workedHours * hourly);
+  const currentMonthData = report || {
+      monthName: '',
+      workedMinutes: 0,
+      plannedMinutes: 0,
+      targetMinutes: 160 * 60
+  };
+
+  const hourlyRate = parseFloat(rate.replace(',', '.')) || 0;
+  const earnedSoFar = (currentMonthData.workedMinutes / 60) * hourlyRate;
+  const projectedExtra = (currentMonthData.plannedMinutes / 60) * hourlyRate;
+  const totalProjected = earnedSoFar + projectedExtra;
 
   return (
     <Screen>
-      <Text style={styles.title}>Kalkulator zarobków</Text>
+      <Text style={styles.headerTitle}>Moje Zarobki</Text>
+      
+      <ScrollView contentContainerStyle={{ paddingBottom: 100 }}>
+        
+        {/* MONTH HEADER */}
+        <Text style={styles.monthLabel}>{currentMonthData.monthName}</Text>
 
-      <Card style={{ marginTop: spacing.md }}>
-        <Text style={styles.label}>Przepracowano (7 dni)</Text>
-        <Text style={styles.value}>{minutesToHhMm(summary.workedMinutes)}</Text>
-
-        <View style={{ marginTop: spacing.md }}>
-          <Text style={styles.label}>Stawka (zł/h) - minimum 30.5 zł/h</Text>
-          <View style={{ flexDirection: 'row', gap: spacing.sm, alignItems: 'center' }}>
-            <TextInput
-              value={rate}
-              onChangeText={setRate}
-              keyboardType="decimal-pad"
-              returnKeyType="done"
-              onSubmitEditing={saveRate}
-              style={[styles.input, { flex: 1 }]}
-              placeholder="30.5"
-              placeholderTextColor="#999"
-            />
-            <TouchableOpacity style={styles.saveBtn} onPress={saveRate}>
-              <Text style={styles.saveBtnText}>Zapisz</Text>
-            </TouchableOpacity>
+        {/* SUMMARY CARD */}
+        <Card style={styles.mainCard}>
+          <Text style={styles.cardLabel}>Przewidywana wypłata</Text>
+          <Text style={styles.bigTotal}>{totalProjected.toFixed(2)} zł</Text>
+          
+          <View style={styles.row}>
+            <View>
+              <Text style={styles.subLabel}>Już zarobiono</Text>
+              <Text style={styles.subValue}>{earnedSoFar.toFixed(2)} zł</Text>
+            </View>
+            <View style={{ alignItems: 'flex-end' }}>
+               <Text style={styles.subLabel}>Z grafiku</Text>
+               <Text style={styles.subValue}>+{projectedExtra.toFixed(2)} zł</Text>
+            </View>
           </View>
+          
+          <View style={styles.progressContainer}>
+             <ProgressBar 
+               value={ (currentMonthData.workedMinutes + currentMonthData.plannedMinutes) / (currentMonthData.targetMinutes || 1)} 
+               height={8}
+               color={colors.primary}
+             />
+             <View style={styles.progressLabels}>
+               <Text style={styles.progressText}>
+                 {minutesToHhMm(currentMonthData.workedMinutes + currentMonthData.plannedMinutes)}
+               </Text>
+               <Text style={styles.progressText}>
+                 Cel: {minutesToHhMm(currentMonthData.targetMinutes)}
+               </Text>
+             </View>
+          </View>
+        </Card>
+
+        {/* SETTINGS CARD */}
+        <Card style={styles.settingsCard}>
+          <Text style={styles.cardHeader}>Ustawienia</Text>
+          
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Stawka godzinowa (brutto)</Text>
+            <View style={styles.inputRow}>
+              <TextInput
+                value={rate}
+                onChangeText={setRate}
+                keyboardType="numeric" // decimal-pad is buggy on some androids
+                returnKeyType="done"
+                editable={!!user?.isEmployer}
+                onSubmitEditing={user?.isEmployer ? saveRate : undefined}
+                style={[styles.input, !user?.isEmployer && styles.inputDisabled]}
+              />
+              <Text style={styles.currency}>PLN / h</Text>
+            </View>
+            {user?.isEmployer ? (
+               <Text style={styles.helperText}>Minimalna stawka: 30.50 zł</Text>
+            ) : (
+               <Text style={styles.helperText}>Stawka ustalana przez pracodawcę</Text>
+            )}
+          </View>
+
+          {user?.isEmployer && (
+            <TouchableOpacity 
+              style={styles.saveBtn} 
+              onPress={saveRate}
+              disabled={saving}
+            >
+               {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnText}>Zapisz Stawkę</Text>}
+            </TouchableOpacity>
+          )}
+        </Card>
+
+        {/* STATS */}
+        <View style={styles.statsGrid}>
+           <View style={styles.statItem}>
+              <Text style={styles.statVal}>{minutesToHhMm(currentMonthData.workedMinutes)}</Text>
+              <Text style={styles.statLab}>Godziny przepracowane</Text>
+           </View>
+           <View style={styles.statItem}>
+              <Text style={styles.statVal}>{minutesToHhMm(currentMonthData.plannedMinutes)}</Text>
+              <Text style={styles.statLab}>Godziny zaplanowane</Text>
+           </View>
         </View>
 
-        <View style={{ marginTop: spacing.md }}>
-          <Text style={styles.label}>Szacunkowe zarobki</Text>
-          <Text style={[styles.value, { fontSize: 20 }]}>{earnings.toFixed(2)} zł</Text>
-        </View>
-
-        <View style={{ marginTop: spacing.md }}>
-          <ProgressBar value={summary.workedMinutes / (summary.targetMinutes || 1)} />
-          <Text style={styles.hint}>Cel: {minutesToHhMm(summary.targetMinutes)} • Plan: {minutesToHhMm(summary.plannedMinutes)}</Text>
-        </View>
-      </Card>
+      </ScrollView>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  title: { fontSize: 22, fontWeight: '700', color: colors.text },
-  label: { color: colors.muted },
-  value: { marginTop: 6, color: colors.text, fontWeight: '700' },
+  headerTitle: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: colors.text,
+    marginBottom: spacing.md,
+  },
+  monthLabel: {
+    fontSize: 18,
+    color: colors.muted,
+    marginBottom: spacing.md,
+    textTransform: 'capitalize',
+    fontWeight: '600',
+  },
+  mainCard: {
+    backgroundColor: colors.text, // Dark card
+    padding: spacing.xl,
+    marginBottom: spacing.lg,
+  },
+  cardLabel: {
+    color: '#fff',
+    opacity: 0.7,
+    fontSize: 14,
+    marginBottom: 4,
+  },
+  bigTotal: {
+    color: '#fff',
+    fontSize: 36,
+    fontWeight: '800',
+    marginBottom: spacing.xl,
+  },
+  row: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: spacing.xl,
+  },
+  subLabel: {
+    color: '#fff',
+    opacity: 0.5,
+    fontSize: 12,
+  },
+  subValue: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 16,
+    marginTop: 2,
+  },
+  progressContainer: {
+    marginTop: spacing.sm,
+  },
+  progressLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 6,
+  },
+  progressText: {
+    color: '#fff',
+    opacity: 0.6,
+    fontSize: 12,
+  },
+  
+  settingsCard: {
+    padding: spacing.lg,
+    marginBottom: spacing.lg,
+  },
+  cardHeader: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: spacing.md,
+  },
+  inputGroup: {
+    marginBottom: spacing.md,
+  },
+  inputLabel: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
   input: {
-    marginTop: 8,
-    backgroundColor: '#F2F4F8',
+    flex: 1,
+    backgroundColor: '#F3F4F6',
     borderRadius: radius.md,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderWidth: 1,
-    borderColor: '#E6EAF2',
+    paddingVertical: 12,
+    fontSize: 16,
+    fontWeight: '600',
     color: colors.text,
   },
+  inputDisabled: {
+    color: colors.muted,
+    backgroundColor: '#E5E7EB',
+  },
+  currency: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.muted,
+  },
+  helperText: {
+    fontSize: 12,
+    color: colors.muted,
+    marginTop: 6,
+  },
   saveBtn: {
-    marginTop: 8,
     backgroundColor: colors.primary,
     borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    justifyContent: 'center',
+    paddingVertical: 14,
     alignItems: 'center',
   },
   saveBtnText: {
     color: '#fff',
-    fontWeight: '600',
-    fontSize: 14,
+    fontWeight: '700',
+    fontSize: 15,
   },
-  hint: { marginTop: 8, color: colors.muted, fontSize: 12 },
+  
+  statsGrid: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  statItem: {
+    flex: 1,
+    backgroundColor: '#fff',
+    padding: spacing.md,
+    borderRadius: radius.lg,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  statVal: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 4,
+  },
+  statLab: {
+    fontSize: 12,
+    color: colors.muted,
+    textAlign: 'center',
+  },
 });

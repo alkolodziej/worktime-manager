@@ -1,54 +1,65 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity } from 'react-native';
 import { colors, spacing, radius } from '../utils/theme';
 import Screen from '../components/Screen';
+import { apiRegister } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export default function LoginScreen({ navigation }) {
+export default function RegisterScreen({ navigation }) {
   const { login } = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [modeEmployer, setModeEmployer] = useState(false); // subtle mode toggle
 
-  const onSubmit = async () => {
-    if (!username.trim()) {
-      setError('Podaj nazwę użytkownika');
+  const onRegister = async () => {
+    if (!username.trim() || !password.trim()) {
+      setError('Wszystkie pola są wymagane');
       return;
     }
-    if (!password.trim()) {
-      setError('Podaj hasło');
+    if (password !== confirmPassword) {
+      setError('Hasła nie są identyczne');
+      return;
+    }
+    if (password.length < 4) {
+      setError('Hasło musi mieć min. 4 znaki');
       return;
     }
     
     setError('');
+    setLoading(true);
+
     try {
-      // viewMode is derived from user role inside login()
-      await login({ username, password });
-      await AsyncStorage.setItem('WTM_LAST_USERNAME', username.trim());
+      // 1. Register
+      const user = await apiRegister(username, password);
+      
+      // 2. Auto-login
+      await login({ username: user.username, password });
+      
+      // 3. Save username hint
+      try { await AsyncStorage.setItem('WTM_LAST_USERNAME', username.trim()); } catch {}
+
+      // 4. Navigate to Onboarding
+      navigation.replace('Onboarding'); 
+      
     } catch (e) {
-      setError('Błąd logowania. Sprawdź dane lub sieć.');
+      console.error(e);
+      setError(e.message || 'Błąd rejestracji');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const valid = username.trim().length > 0 && password.length >= 0; // Allow partial typing, strict val on submit
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const last = await AsyncStorage.getItem('WTM_LAST_USERNAME');
-        if (last) setUsername(last);
-      } catch {}
-    })();
-  }, []);
+  const valid = username.trim().length > 0 && password.length >= 4 && password === confirmPassword;
 
   return (
     <Screen>
       <View style={styles.header}>
-        <Text style={styles.title}>WorkTime</Text>
-        <Text style={styles.subtitle}>Zaloguj się, aby kontynuować</Text>
+        <Text style={styles.title}>Rejestracja</Text>
+        <Text style={styles.subtitle}>Utwórz konto w WorkTime</Text>
       </View>
 
       <View style={styles.card}>
@@ -56,7 +67,7 @@ export default function LoginScreen({ navigation }) {
         <TextInput
           value={username}
           onChangeText={setUsername}
-          placeholder="jan.kowalski"
+          placeholder="np. jan.kowalski"
           autoCapitalize="none"
           style={styles.input}
           placeholderTextColor={colors.muted}
@@ -77,14 +88,28 @@ export default function LoginScreen({ navigation }) {
           </TouchableOpacity>
         </View>
 
+        <Text style={[styles.label, { marginTop: spacing.md }]}>Powtórz hasło</Text>
+        <TextInput
+          value={confirmPassword}
+          onChangeText={setConfirmPassword}
+          placeholder="••••••••"
+          secureTextEntry={!showPassword}
+          style={styles.input}
+          placeholderTextColor={colors.muted}
+        />
+
         {!!error && <Text style={styles.error}>{error}</Text>}
 
-        <TouchableOpacity style={[styles.button, !valid && styles.buttonDisabled]} onPress={onSubmit} disabled={!valid}>
-          <Text style={styles.buttonText}>Zaloguj</Text>
+        <TouchableOpacity 
+          style={[styles.button, (!valid || loading) && styles.buttonDisabled]} 
+          onPress={onRegister} 
+          disabled={!valid || loading}
+        >
+          <Text style={styles.buttonText}>{loading ? 'Rejestrowanie...' : 'Utwórz konto'}</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={{ marginTop: spacing.lg, alignItems: 'center' }} onPress={() => navigation.navigate('Register')}>
-          <Text style={{ color: colors.primary, fontWeight: '500' }}>Nie masz konta? Zarejestruj się</Text>
+        <TouchableOpacity style={{ marginTop: spacing.lg, alignItems: 'center' }} onPress={() => navigation.navigate('Login')}>
+           <Text style={{ color: colors.primary, fontWeight: '500' }}>Masz już konto? Zaloguj się</Text>
         </TouchableOpacity>
       </View>
     </Screen>
@@ -142,11 +167,6 @@ const styles = StyleSheet.create({
   buttonText: {
     color: '#fff',
     fontWeight: '700',
-  },
-  hint: {
-    marginTop: spacing.md,
-    color: colors.muted,
-    textAlign: 'center',
   },
   reveal: {
     position: 'absolute',
