@@ -5,7 +5,7 @@ import Screen from '../components/Screen';
 import Card from '../components/Card';
 import Badge from '../components/Badge';
 import SectionHeader from '../components/SectionHeader';
-import { dayNamePl, formatDateLabel, formatTimeRange, minutesToHhMm, parseTimeMinutes } from '../utils/format';
+import { dayNamePl, formatDateLabel, formatTimeRange, minutesToHhMm, getWeekRange } from '../utils/format';
 import { apiGetShifts, apiCreateSwap } from '../utils/api'; 
 import { showToast } from '../components/Toast';
 import { useAuth } from '../context/AuthContext';
@@ -15,22 +15,46 @@ export default function ScheduleScreen() {
   const { user } = useAuth();
   const [range, setRange] = useState('week'); // 'week' | 'month'
   const [viewDate, setViewDate] = useState(new Date()); // Reference date for navigation
-  const [base, setBase] = useState([]);
+  const [sections, setSections] = useState([]);
+  const [summary, setSummary] = useState('0h 00m');
   const [refreshing, setRefreshing] = useState(false);
   const [selectedShift, setSelectedShift] = useState(null);
 
   const loadShifts = useCallback(async () => {
     if (!user?.id) return;
     try {
-      const list = await apiGetShifts({ assignedUserId: user.id });
-      // Sort by date asc
-      list.sort((a, b) => new Date(a.date) - new Date(b.date));
-      setBase(list);
+      let from, to;
+      if (range === 'week') {
+          const { start, end } = getWeekRange(viewDate);
+          from = start; to = end;
+      } else {
+          from = new Date(viewDate.getFullYear(), viewDate.getMonth(), 1);
+          to = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 0);
+      }
+
+      const res = await apiGetShifts({ 
+        assignedUserId: user.id,
+        from,
+        to,
+        groupBy: 'date',
+        summary: 'true'
+      });
+      
+      // res.data is object { "YYYY-MM-DD": [...] }
+      // Convert to sections
+      const rawGroups = res.data || {};
+      const newSections = Object.keys(rawGroups).sort().map(dateKey => ({
+          title: dateKey, // Format handled in SectionHeader or here
+          data: rawGroups[dateKey]
+      }));
+      
+      setSections(newSections);
+      setSummary(minutesToHhMm(res.totalMinutes || 0));
     } catch (error) {
       console.error('Failed to fetch shifts:', error);
       showToast('Nie udało się załadować grafiku', 'error');
     }
-  }, [user?.id]);
+  }, [user?.id, range, viewDate]);
 
   useEffect(() => {
     loadShifts();
@@ -74,22 +98,6 @@ export default function ScheduleScreen() {
       return `${f(start)} - ${f(end)}`;
     }
   }, [viewDate, range]);
-
-  const filtered = useMemo(() => filterByRange(base, range, viewDate), [base, range, viewDate]);
-  const sections = useMemo(() => groupByDate(filtered), [filtered]);
-
-  // Calculate summary
-  const summary = useMemo(() => {
-    let totalMinutes = 0;
-    filtered.forEach(s => {
-      const sh = parseTimeMinutes(s.start);
-      const eh = parseTimeMinutes(s.end);
-      let diff = eh - sh;
-      if (diff < 0) diff += 24 * 60;
-      totalMinutes += diff;
-    });
-    return minutesToHhMm(totalMinutes);
-  }, [filtered]);
 
   const handleOfferSwap = async (shift) => {
     if (!shift) return;
@@ -145,7 +153,7 @@ export default function ScheduleScreen() {
 
       <SectionList
         sections={sections}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item, index) => `${item.id}-${index}`}
         renderSectionHeader={({ section }) => (
           <SectionHeader title={`${section.title}`} />
         )}
@@ -376,60 +384,6 @@ const styles = StyleSheet.create({
   },
 });
 
-function groupByDate(list) {
-  const map = new Map();
-  (list || []).filter(Boolean).forEach((shift) => {
-    if (!shift?.date) return;
-    // Ensure date is a Date object
-    const dateObj = shift.date instanceof Date ? shift.date : new Date(shift.date);
-    const key = `${dayNamePl(dateObj)}, ${formatDateLabel(dateObj)}`;
-    if (!map.has(key)) map.set(key, []);
-    map.get(key).push(shift);
-  });
-  return Array.from(map.entries()).map(([title, data]) => ({ title, data }));
-}
-
-function filterByRange(list, range, refDate) {
-  if (range === 'month') {
-    const m = refDate.getMonth();
-    const y = refDate.getFullYear();
-    return list.filter(s => {
-      const dateObj = s.date instanceof Date ? s.date : new Date(s.date);
-      return dateObj.getMonth() === m && dateObj.getFullYear() === y;
-    });
-  }
-  
-  // week: Monday to Sunday of the refDate's week
-  const { start, end } = getWeekRange(refDate);
-  return list.filter(s => {
-    const dateObj = s.date instanceof Date ? s.date : new Date(s.date);
-    // Be careful with time components in comparisons
-    const d = startOfDay(dateObj);
-    return d >= start && d <= end;
-  });
-}
-
-function getWeekRange(date) {
-  const start = startOfDay(date);
-  const day = start.getDay(); // 0 (Sun) to 6 (Sat)
-  // Worktime usually treats Monday as start. 
-  // If Today is Sunday (0), Monday was -6 days ago.
-  // If Today is Monday (1), Monday is 0 days ago.
-  const diffToMon = day === 0 ? -6 : 1 - day; 
-  start.setDate(start.getDate() + diffToMon);
-  
-  const end = new Date(start);
-  end.setDate(end.getDate() + 6);
-  
-  return { start, end };
-}
-
-function startOfDay(d) {
-  const x = new Date(d);
-  x.setHours(0,0,0,0);
-  return x;
-}
-
 function SegmentButton({ label, selected, onPress }) {
   return (
     <TouchableOpacity
@@ -450,3 +404,4 @@ function SegmentButton({ label, selected, onPress }) {
     </TouchableOpacity>
   );
 }
+

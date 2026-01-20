@@ -180,9 +180,7 @@ export default function AvailabilityScreen() {
   };
 
   return (
-    <Screen edges={['bottom']}>
-       <Text style={styles.headerTitle}>Moja Dostępność</Text>
-      
+    <Screen edges={['bottom']}>      
       <ScrollView contentContainerStyle={{ paddingBottom: 100 }}>
         <Calendar
           onDayPress={onDayPress}

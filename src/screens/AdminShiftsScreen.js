@@ -5,7 +5,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { colors, spacing, radius } from '../utils/theme';
 import Screen from '../components/Screen';
 import { Ionicons } from '@expo/vector-icons';
-import { apiGetShifts, apiCreateShift, apiDeleteShift, apiUpdateShift, apiGetUsers, apiGetPositions, apiGetAvailabilities } from '../utils/api';
+import { apiGetShifts, apiCreateShift, apiDeleteShift, apiUpdateShift, apiGetUsers, apiGetPositions, apiGetAvailableUsers } from '../utils/api';
 import { showToast } from '../components/Toast';
 import DateTimePicker from '../components/DateTimePicker';
 
@@ -24,8 +24,10 @@ export default function AdminShiftsScreen() {
   const [items, setItems] = useState({}); // { "2024-01-01": [Shift, Shift], ... }
   const [users, setUsers] = useState([]);
   const [positions, setPositions] = useState([]);
-  const [availabilities, setAvailabilities] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // For Picker
+  const [availableUsers, setAvailableUsers] = useState([]);
 
   // UI State
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
@@ -47,14 +49,12 @@ export default function AdminShiftsScreen() {
 
   const fetchMetadata = async () => {
     try {
-      const [u, p, a] = await Promise.all([
+      const [u, p] = await Promise.all([
         apiGetUsers(), 
-        apiGetPositions(),
-        apiGetAvailabilities({})
+        apiGetPositions()
       ]);
       setUsers(u);
       setPositions(p);
-      setAvailabilities(a);
     } catch (e) {
       console.error("Metadata fetch error", e);
     }
@@ -75,18 +75,8 @@ export default function AdminShiftsScreen() {
   const fetchShifts = async (from, to) => {
     setLoading(true);
     try {
-      const shifts = await apiGetShifts({ from, to });
-      
-      // Group by date
-      const grouped = {};
-      shifts.forEach(s => {
-        const dObj = s.date instanceof Date ? s.date : new Date(s.date);
-        const str = dObj.toISOString().split('T')[0];
-        
-        if (!grouped[str]) grouped[str] = [];
-        grouped[str].push(s);
-      });
-
+      // Use backend grouping
+      const grouped = await apiGetShifts({ from, to, groupBy: 'date' });
       setItems(grouped);
     } catch (e) {
       showToast('Błąd pobierania grafiku', 'error');
@@ -116,19 +106,17 @@ export default function AdminShiftsScreen() {
     return marks;
   }, [items, selectedDate]);
 
-  const getAvailabilityInfo = (userId, dateStr) => {
-    // Check if availabilities have dates matching dateStr
-    // Note: Availability date format might vary. Assuming ISO YYYY-MM-DD based on typical API.
-    const avail = availabilities.find(a => a.userId === userId && (a.date === dateStr || a.date?.startsWith(dateStr)));
-    if (avail) {
-      if (avail.type === 'unavailable') return { text: 'Niedostępny', color: colors.error };
-      return { text: `${avail.start} - ${avail.end}`, color: colors.success };
-    }
-    return null;
-  };
-
   // Modal Handlers
-  const openModal = (shift = null) => {
+  const openModal = async (shift = null) => {
+    // Fetch availability for the selected date
+    try {
+       const aUsers = await apiGetAvailableUsers(selectedDate);
+       setAvailableUsers(aUsers);
+    } catch (e) {
+       console.error(e);
+       setAvailableUsers(users); // Fallback
+    }
+
     if (shift) {
       setEditingShift(shift);
       setFormUserId(shift.assignedUserId);
@@ -166,6 +154,11 @@ export default function AdminShiftsScreen() {
       return;
     }
 
+    if (formStart >= formEnd) {
+      showToast('Godzina końca musi być późniejsza', 'error');
+      return;
+    }
+
     try {
       const payload = {
         date: selectedDate,
@@ -174,7 +167,7 @@ export default function AdminShiftsScreen() {
         assignedUserId: formUserId,
         role: positions.find(p => p.id === formPositionId)?.name || 'Pracownik',
         positionId: formPositionId,
-        location: 'Biuro'
+        location: 'Lokal główny' // Default location
       };
 
       if (editingShift) {
@@ -355,10 +348,24 @@ export default function AdminShiftsScreen() {
               <View style={styles.pickerContent}>
                 <Text style={styles.pickerHeader}>Wybierz pracownika</Text>
                 <FlatList 
-                  data={users}
+                  data={availableUsers.length > 0 ? availableUsers : users}
                   keyExtractor={(i, index) => `${i.id}-${index}`}
                   renderItem={({ item }) => {
-                    const avail = getAvailabilityInfo(item.id, selectedDate);
+                    // Availability is attached by backend in availableUsers array
+                    const avail = item.availability;
+                    let availText = null;
+                    let availColor = colors.muted;
+
+                    if (avail) {
+                        if (avail.type === 'unavailable') {
+                            availText = 'Niedostępny';
+                            availColor = colors.error;
+                        } else {
+                            availText = `${avail.start} - ${avail.end}`;
+                            availColor = colors.success;
+                        }
+                    }
+
                     return (
                       <TouchableOpacity 
                         style={styles.pickerItem} 
@@ -368,9 +375,9 @@ export default function AdminShiftsScreen() {
                           <Text style={[styles.pickerItemText, item.id === formUserId && styles.pickerItemSel]}>
                              {item.name}
                           </Text>
-                          {avail ? (
-                             <Text style={{ fontSize: 12, color: avail.color, marginTop: 2 }}>
-                               {avail.text}
+                          {availText ? (
+                             <Text style={{ fontSize: 12, color: availColor, marginTop: 2 }}>
+                               {availText}
                              </Text>
                           ) : (
                              <Text style={{ fontSize: 12, color: colors.muted, marginTop: 2 }}>Brak danych o dyspozycyjności</Text>

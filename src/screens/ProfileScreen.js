@@ -7,7 +7,7 @@ import { useAuth } from '../context/AuthContext';
 import Card from '../components/Card';
 import ListItem from '../components/ListItem';
 import { Ionicons } from '@expo/vector-icons';
-import { apiGetCompany, apiGetUserProfile, apiUpdateUserProfile, apiGetUsers, apiUploadProfilePhoto, apiGetPositions, apiAssignPositions, apiGetTimesheets } from '../utils/api';
+import { apiGetCompany, apiGetUserProfile, apiUpdateUserProfile, apiGetUsers, apiDeleteUser, apiUploadProfilePhoto, apiGetPositions, apiAssignPositions, apiGetTimesheets } from '../utils/api';
 import { useNavigation } from '@react-navigation/native';
 import { showToast } from '../components/Toast';
 import { CameraModal } from '../components/CameraModal';
@@ -204,6 +204,33 @@ export default function ProfileScreen() {
     }
   };
 
+  const handleDeleteUser = () => {
+    if (!editingEmployee) return;
+
+    Alert.alert(
+      "Usuń pracownika",
+      `Czy na pewno chcesz usunąć pracownika ${editingEmployee.name || editingEmployee.username}?`,
+      [
+        { text: "Anuluj", style: "cancel" },
+        { 
+          text: "Usuń", 
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await apiDeleteUser(editingEmployee.id);
+              showToast('Pracownik usunięty', 'success');
+              setEditingEmployee(null);
+              loadData();
+            } catch (e) {
+              console.error(e);
+              showToast('Nie udało się usunąć pracownika', 'error');
+            }
+          }
+        }
+      ]
+    );
+  };
+
   return (
     <Screen>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
@@ -277,7 +304,7 @@ export default function ProfileScreen() {
           <TouchableOpacity onPress={() => nav.navigate('Swaps')}>
             <ListItem title='Giełda Zmian' subtitle='Wymieniaj się zmianami' icon='swap-horizontal-outline' />
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => nav.navigate('EarningsCalculator')}>
+          <TouchableOpacity onPress={() => nav.navigate('Earnings')}>
              <ListItem title='Kalkulator' subtitle='Oblicz wypłatę' icon='calculator-outline' />
           </TouchableOpacity>
         </Card>
@@ -381,13 +408,25 @@ export default function ProfileScreen() {
                 </View>
              </ScrollView>
 
-             <View style={styles.modalActions}>
-                <TouchableOpacity style={{ flex: 1, padding: 12 }} onPress={() => setEditingEmployee(null)}>
-                  <Text style={{ textAlign: 'center', color: colors.muted, fontWeight: '600' }}>Anuluj</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.modalSaveBtn} onPress={saveEmployee}>
-                  <Text style={{ color: '#fff', fontWeight: '700' }}>Zapisz</Text>
-                </TouchableOpacity>
+             <View style={{ marginTop: 16 }}>
+                {!editingEmployee?.isEmployer && (
+                  <TouchableOpacity 
+                    style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 10, backgroundColor: '#FEF2F2', borderRadius: radius.md, marginBottom: 16 }} 
+                    onPress={handleDeleteUser}
+                  >
+                    <Ionicons name="trash-outline" size={18} color="#EF4444" style={{ marginRight: 6 }} />
+                    <Text style={{ color: '#EF4444', fontWeight: '600' }}>Usuń pracownika</Text>
+                  </TouchableOpacity>
+                )}
+
+                <View style={styles.modalActions}>
+                  <TouchableOpacity style={{ flex: 1, padding: 12 }} onPress={() => setEditingEmployee(null)}>
+                    <Text style={{ textAlign: 'center', color: colors.muted, fontWeight: '600' }}>Anuluj</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.modalSaveBtn} onPress={saveEmployee}>
+                    <Text style={{ color: '#fff', fontWeight: '700' }}>Zapisz</Text>
+                  </TouchableOpacity>
+                </View>
              </View>
            </View>
          </View>

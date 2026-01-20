@@ -63,3 +63,22 @@ export function parseTimeMinutes(val) {
    
    return h * 60 + m;
 }
+
+function startOfDay(d) {
+  const x = new Date(d);
+  x.setHours(0,0,0,0);
+  return x;
+}
+
+export function getWeekRange(date) {
+  const start = startOfDay(date);
+  const day = start.getDay(); // 0 (Sun) to 6 (Sat)
+  // Worktime usually treats Monday as start. 
+  const diffToMon = day === 0 ? -6 : 1 - day; 
+  start.setDate(start.getDate() + diffToMon);
+  
+  const end = new Date(start);
+  end.setDate(end.getDate() + 6);
+  
+  return { start, end };
+}

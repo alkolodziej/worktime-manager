@@ -6,7 +6,7 @@ import Badge from '../components/Badge';
 import { showToast } from '../components/Toast';
 import { colors, spacing, radius } from '../utils/theme';
 import { useAuth } from '../context/AuthContext';
-import { apiGetShifts, apiGetSwaps, apiGetUsers, apiCancelSwap, apiAcceptSwap } from '../utils/api';
+import { apiGetSwaps, apiCancelSwap, apiAcceptSwap } from '../utils/api';
 import { formatTimeRange } from '../utils/format';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -14,9 +14,8 @@ export default function SwapsScreen() {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('market'); // 'market' | 'mine'
   
-  const [swaps, setSwaps] = useState([]);
-  const [shifts, setShifts] = useState([]);
-  const [users, setUsers] = useState([]);
+  const [marketSwaps, setMarketSwaps] = useState([]);
+  const [mySwaps, setMySwaps] = useState([]);
   
   const [loading, setLoading] = useState(false);
   const [processingId, setProcessingId] = useState(null);
@@ -25,14 +24,12 @@ export default function SwapsScreen() {
     if (!user?.id) return;
     setLoading(true);
     try {
-      const [allSwaps, allShifts, allUsers] = await Promise.all([
-        apiGetSwaps({}), // Get ALL swaps to see market
-        apiGetShifts({}), // Get all shifts to resolve details
-        apiGetUsers(),
+      const [market, mine] = await Promise.all([
+        apiGetSwaps({ userId: user.id, type: 'market' }),
+        apiGetSwaps({ userId: user.id, type: 'mine' }),
       ]);
-      setSwaps(allSwaps);
-      setShifts(allShifts);
-      setUsers(allUsers);
+      setMarketSwaps(market);
+      setMySwaps(mine);
     } catch (e) {
       console.error(e);
       showToast('Błąd pobierania danych', 'error');
@@ -42,19 +39,6 @@ export default function SwapsScreen() {
   }, [user?.id]);
 
   useEffect(() => { loadData(); }, [loadData]);
-
-  // Derived filtered lists
-  const marketSwaps = useMemo(() => {
-    return swaps.filter(s => 
-      s.status === 'pending' && 
-      s.requesterId !== user?.id &&
-      (!s.targetUserId || s.targetUserId === user?.id) // Open or directed to me
-    );
-  }, [swaps, user?.id]);
-
-  const mySwaps = useMemo(() => {
-    return swaps.filter(s => s.requesterId === user?.id);
-  }, [swaps, user?.id]);
 
   const handleTakeSwap = async (swap) => {
     Alert.alert(
@@ -110,13 +94,13 @@ export default function SwapsScreen() {
   };
 
   const renderSwapItem = ({ item }) => {
-    const shift = shifts.find(s => s.id === item.shiftId);
-    if (!shift) return null; // Orphaned swap?
+    const shift = item.shift;
+    if (!shift) return null; 
 
-    const requester = users.find(u => u.id === item.requesterId);
     const dateObj = new Date(shift.date);
     const isMine = item.requesterId === user?.id;
     const isPending = item.status === 'pending';
+    const requesterName = item.requesterName || 'Nieznany';
 
     return (
       <Card style={[styles.card, !isPending && { opacity: 0.6 }]}>
@@ -128,7 +112,7 @@ export default function SwapsScreen() {
              <Text style={styles.timeText}>{formatTimeRange(shift.start, shift.end)}</Text>
           </View>
           <Badge 
-            label={isMine ? prettyStatus(item.status) : (requester?.name || 'Ktoś')} 
+            label={isMine ? prettyStatus(item.status) : requesterName} 
             tone={isMine ? getStatusTone(item.status) : 'info'} 
           />
         </View>
@@ -167,6 +151,7 @@ export default function SwapsScreen() {
   return (
     <Screen>
        <Text style={styles.headerTitle}>Giełda Zmian</Text>
+       <Text style={{ color: colors.muted, marginBottom: spacing.lg }}>Przeglądaj dostępne zmiany lub zarządzaj swoimi ofertami zamiany.</Text>
        
        <View style={styles.tabs}>
          <TabButton title="Dostępne (Giełda)" active={activeTab === 'market'} onPress={() => setActiveTab('market')} count={marketSwaps.length} />

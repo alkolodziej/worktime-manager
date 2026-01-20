@@ -73,12 +73,13 @@ export default function EarningsCalculatorScreen() {
       monthName: '',
       workedMinutes: 0,
       plannedMinutes: 0,
-      targetMinutes: 160 * 60
+      targetMinutes: 160 * 60,
+      earnedValue: 0,
+      projectedValue: 0
   };
 
-  const hourlyRate = parseFloat(rate.replace(',', '.')) || 0;
-  const earnedSoFar = (currentMonthData.workedMinutes / 60) * hourlyRate;
-  const projectedExtra = (currentMonthData.plannedMinutes / 60) * hourlyRate;
+  const earnedSoFar = currentMonthData.earnedValue || 0;
+  const projectedExtra = currentMonthData.projectedValue || 0;
   const totalProjected = earnedSoFar + projectedExtra;
 
   return (

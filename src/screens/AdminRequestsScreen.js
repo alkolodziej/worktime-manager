@@ -5,7 +5,7 @@ import Screen from '../components/Screen';
 import Card from '../components/Card';
 import Badge from '../components/Badge';
 import { colors, spacing, radius } from '../utils/theme';
-import { apiGetSwaps, apiAcceptSwap, apiRejectSwap, apiGetAvailabilities, apiGetUsers } from '../utils/api';
+import { apiGetSwaps, apiAcceptSwap, apiRejectSwap, apiGetAvailabilities } from '../utils/api';
 import { showToast } from '../components/Toast';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -13,20 +13,17 @@ export default function AdminRequestsScreen() {
   const [activeTab, setActiveTab] = useState('swaps'); // 'swaps' | 'avails'
   const [swaps, setSwaps] = useState([]);
   const [avails, setAvails] = useState([]);
-  const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [s, a, u] = await Promise.all([
-        apiGetSwaps({}),
-        apiGetAvailabilities({}),
-        apiGetUsers()
+      const [s, a] = await Promise.all([
+        apiGetSwaps({ includeNames: true }),
+        apiGetAvailabilities({ includeNames: true })
       ]);
       setSwaps(s);
       setAvails(a);
-      setUsers(u);
     } catch (err) {
       showToast('Błąd pobierania danych', 'error');
     } finally {
@@ -39,11 +36,6 @@ export default function AdminRequestsScreen() {
       loadData();
     }, [loadData])
   );
-
-  const getUserName = (userId) => {
-    const u = users.find(x => x.id === userId);
-    return u ? u.name : `ID: ${userId}`;
-  };
 
   const handleAcceptSwap = async (swapId) => {
     try {
@@ -77,8 +69,8 @@ export default function AdminRequestsScreen() {
   // -- RENDERERS --
 
   const renderSwapItem = ({ item }) => {
-    const requester = getUserName(item.requesterId);
-    const target = item.targetUserId ? getUserName(item.targetUserId) : 'Ktokolwiek';
+    const requester = item.requesterName || `ID: ${item.requesterId}`;
+    const target = item.targetName || 'Ktokolwiek';
     
     return (
       <Card style={styles.card}>
@@ -117,7 +109,7 @@ export default function AdminRequestsScreen() {
 
   const renderAvailItem = ({ item }) => {
     // availability item structure? assuming: { userId, date, start, end, ... }
-    const user = getUserName(item.userId);
+    const user = item.userName || `ID: ${item.userId}`;
     const dateStr = new Date(item.date).toLocaleDateString('pl-PL', { weekday: 'short', day: '2-digit', month: 'short' });
 
     return (
@@ -138,8 +130,7 @@ export default function AdminRequestsScreen() {
     );
   };
 
-  const pendingSwaps = swaps.filter(s => s.status === 'pending'); // Show only pending in this view? Or all? code said "Pending"
-  // Let's show all pending first, maybe history later. For now, matching old logic.
+  const pendingSwaps = swaps.filter(s => s.status === 'pending');
   
   const data = activeTab === 'swaps' ? pendingSwaps : avails;
 

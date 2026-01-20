@@ -68,14 +68,56 @@ export async function apiRegister(username, password, name) {
   return http('/register', { method: 'POST', body: { username, password, name } });
 }
 
-export async function apiGetShifts({ from, to, assignedUserId } = {}) {
+export async function apiGetDashboard(userId) { return http(`/dashboard/${userId}`); }
+
+export async function apiGetShifts({ from, to, assignedUserId, groupBy, summary } = {}) {
   const params = new URLSearchParams();
-  if (from) params.set('from', from.toISOString());
-  if (to) params.set('to', to.toISOString());
+  if (from) params.set('from', from instanceof Date ? from.toISOString() : from);
+  if (to) params.set('to', to instanceof Date ? to.toISOString() : to);
   if (assignedUserId) params.set('assignedUserId', assignedUserId);
+  if (groupBy) params.set('groupBy', groupBy);
+  if (summary) params.set('summary', summary);
+  
   const data = await http(`/shifts${params.toString() ? `?${params.toString()}` : ''}`);
-  // Convert date strings to Date objects
-  return data.map((s) => ({ ...s, date: new Date(s.date) }));
+  
+  // If array, map dates
+  if (Array.isArray(data)) {
+    return data.map((s) => ({ ...s, date: new Date(s.date) }));
+  }
+  
+  // If grouped object (dictionary)
+  if (groupBy === 'date' && !summary) {
+      // Map dates inside the object values
+      const result = {};
+      Object.keys(data).forEach(key => {
+          result[key] = data[key].map(s => ({ ...s, date: new Date(s.date) }));
+      });
+      return result;
+  }
+
+  // If summary response { data, totalMinutes }
+  if (summary) {
+      // "data.data" can be array or object. 
+      // If our backend returns "data" field for the list/grouped
+      // My backend implementation: res.json({ data: result, totalMinutes })
+      // And result is either Array or Object(grouped)
+      
+      const rawData = data.data;
+      let parsedData = rawData;
+      
+      if (Array.isArray(rawData)) {
+          parsedData = rawData.map(s => ({ ...s, date: new Date(s.date) }));
+      } else if (rawData && typeof rawData === 'object') {
+          parsedData = {};
+          Object.keys(rawData).forEach(key => {
+              parsedData[key] = rawData[key].map(s => ({ ...s, date: new Date(s.date) }));
+          });
+      }
+      
+      return { ...data, data: parsedData };
+  }
+
+  return data;
 }
 
 export async function apiClockIn({ userId, shiftId, timestamp, location }) {
@@ -95,8 +137,17 @@ export async function apiGetCompany() {
 }
 
 // Users
+// New optimized endpoint for availability
+export async function apiGetAvailableUsers(date) {
+  return http(`/users/filter?date=${date}`);
+}
+
 export async function apiGetUsers() {
   return http('/users');
+}
+
+export async function apiDeleteUser(userId) {
+  return http(`/users/${userId}`, { method: 'DELETE' });
 }
 
 export async function apiGetFilteredUsers({ date, positionIds, includeUnavailable = false } = {}) {
@@ -108,11 +159,12 @@ export async function apiGetFilteredUsers({ date, positionIds, includeUnavailabl
 }
 
 // Availabilities
-export async function apiGetAvailabilities({ userId, from, to } = {}) {
+export async function apiGetAvailabilities({ userId, from, to, includeNames } = {}) {
   const params = new URLSearchParams();
   if (userId) params.set('userId', userId);
   if (from) params.set('from', from.toISOString());
   if (to) params.set('to', to.toISOString());
+  if (includeNames) params.set('includeNames', 'true');
   const data = await http(`/availabilities${params.toString() ? `?${params.toString()}` : ''}`);
   return Array.isArray(data) ? data : [];
 }
@@ -126,9 +178,11 @@ export async function apiDeleteAvailability(id) {
 }
 
 // Swaps
-export async function apiGetSwaps({ userId } = {}) {
+export async function apiGetSwaps({ userId, type, includeNames } = {}) {
   const params = new URLSearchParams();
   if (userId) params.set('userId', userId);
+  if (type) params.set('type', type);
+  if (includeNames) params.set('includeNames', 'true');
   return http(`/swaps${params.toString() ? `?${params.toString()}` : ''}`);
 }
 

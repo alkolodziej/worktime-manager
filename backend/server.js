@@ -3,7 +3,7 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 const express = require('express');
 const cors = require('cors');
-const { parseISO, differenceInMinutes, startOfMonth, endOfMonth, addMinutes } = require('date-fns');
+const { parseISO, differenceInMinutes, startOfMonth, endOfMonth, addMinutes, startOfWeek, endOfWeek } = require('date-fns');
 
 const PORT = Number(process.env.PORT || process.env.BACKEND_PORT || 8000);
 const HOST = process.env.HOST || process.env.BACKEND_HOST || '0.0.0.0';
@@ -80,6 +80,36 @@ app.get('/company/location', (req, res) => {
     name: 'Główna restauracja',
   };
   res.json(location);
+});
+
+// LOCATION CHECK ENDPOINT
+// Validates user coordinates against company location using Haversine formula.
+// Moves logic from frontend: protecting company coordinates, geospatial math.
+app.post('/company/check-location', (req, res) => {
+    const { latitude, longitude } = req.body;
+    if (!latitude || !longitude) return res.status(400).json({ error: 'Missing coords' });
+
+    const db = readDb();
+    const target = db.company?.location || { latitude: 52.2297, longitude: 21.0122, radius: 100 };
+    
+    // Haversine formula
+    const R = 6371e3; 
+    const φ1 = (latitude * Math.PI) / 180;
+    const φ2 = (target.latitude * Math.PI) / 180;
+    const Δφ = ((target.latitude - latitude) * Math.PI) / 180;
+    const Δλ = ((target.longitude - longitude) * Math.PI) / 180;
+
+    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+              Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    const distance = R * c; // meters
+    
+    res.json({
+        isWithin: distance <= target.radius,
+        distance: Math.round(distance),
+        radius: target.radius
+    });
 });
 
 app.post('/login', (req, res) => {
@@ -209,9 +239,158 @@ app.get('/users/:id', (req, res) => {
   res.json(user);
 });
 
+app.delete('/users/:id', (req, res) => {
+  const db = readDb();
+  const userId = req.params.id;
+  const initialLength = db.users.length;
+  
+  // Prevent deleting if it's the last admin? Not required by prompt.
+  
+  db.users = db.users.filter(u => u.id !== userId);
+  
+  if (db.users.length === initialLength) {
+    return res.status(404).json({ error: 'Użytkownik nie znaleziony.' });
+  }
+  
+  writeDb(db);
+  res.json({ success: true, id: userId });
+});
+
+// Helper to get shift start/end as Date objects
+function getShiftIntervals(shift) {
+  // Try parsing strictly as date objects first (ISO format from admin panel)
+  let start = new Date(shift.start);
+  let end = new Date(shift.end);
+
+  // If invalid date (NaN), then fallback to HH:MM construction (legacy/mock)
+  if (isNaN(start.getTime())) {
+      const dateStr = shift.date.split('T')[0];
+      start = new Date(`${dateStr}T${shift.start}:00`);
+  }
+  
+  if (isNaN(end.getTime())) {
+      const dateStr = shift.date.split('T')[0];
+      end = new Date(`${dateStr}T${shift.end}:00`);
+  }
+
+  // Handle overnight logic ONLY if we constructed dates manually from HH:MM 
+  // (Assuming ISO timestamps are already correct absolute times)
+  if (end < start && shift.start.length <= 5) {
+     end = addMinutes(end, 24 * 60);
+  }
+
+  return { start, end };
+}
+
+// DASHBOARD ENDPOINT
+// Returns consolidated view for HomeScreen: next shift, active timer, validation rules, weekly summary.
+// Moves logic from frontend: calculating next shift, summing weekly hours, checking clock-in rules.
+app.get('/dashboard/:userId', (req, res) => {
+  const { userId } = req.params;
+  const db = readDb();
+  const now = new Date();
+
+  // 1. Find Next Shift
+  const userShifts = (db.shifts || []).filter(s => s.assignedUserId === userId);
+  const upcoming = userShifts.map(s => {
+      const { start, end } = getShiftIntervals(s);
+      return { ...s, startTime: start, endTime: end };
+  })
+  .filter(s => s.endTime > now) // Only shifts that haven't ended
+  .sort((a, b) => a.startTime - b.startTime);
+
+  const nextShift = upcoming[0] ? {
+      ...upcoming[0],
+      startTime: upcoming[0].startTime.toISOString(),
+      endTime: upcoming[0].endTime.toISOString(),
+      isToday: upcoming[0].startTime.toDateString() === now.toDateString()
+  } : null;
+
+  // 2. Calculate Weekly Stats (Mon-Sun)
+  const current = new Date(now);
+  const day = current.getDay();
+  const diff = current.getDate() - day + (day === 0 ? -6 : 1);
+  const monday = new Date(current.setDate(diff));
+  monday.setHours(0, 0, 0, 0);
+  const nextMonday = new Date(monday);
+  nextMonday.setDate(monday.getDate() + 7);
+
+  // Worked
+  const timesheets = (db.timesheets || []).filter(t => t.userId === userId);
+  let workedMinutes = 0;
+  timesheets.forEach(t => {
+      const inTime = parseISO(t.clockIn);
+      // Check overlap with this week
+      if (inTime >= monday && inTime < nextMonday && t.clockOut) {
+          workedMinutes += differenceInMinutes(parseISO(t.clockOut), inTime);
+      }
+  });
+
+  // Planned
+  let plannedMinutes = 0;
+  userShifts.forEach(s => {
+      // Check if shift date falls in this week
+      const sDate = parseISO(s.date);
+      if (sDate >= monday && sDate < nextMonday) {
+          const { start, end } = getShiftIntervals(s);
+          plannedMinutes += differenceInMinutes(end, start);
+      }
+  });
+
+  // 3. Clock-In Validation Rules
+  const clockInRules = {
+      canClockIn: false,
+      status: 'no_shift',
+      message: 'Brak zaplanowanej zmiany na dzisiaj'
+  };
+
+  if (nextShift && nextShift.isToday) {
+      const start = new Date(nextShift.startTime);
+      const end = new Date(nextShift.endTime);
+      const bufferMs = 30 * 60 * 1000;
+      const earlyStart = new Date(start.getTime() - bufferMs);
+
+      if (now < earlyStart) {
+           clockInRules.status = 'too_early';
+           const minsToStart = Math.ceil((start - now) / 60000);
+           const h = Math.floor(minsToStart / 60);
+           const m = minsToStart % 60;
+           clockInRules.message = `Za wcześnie. Start za ${h > 0 ? h + 'h ' : ''}${m}m`;
+      } else if (now > end) {
+           clockInRules.status = 'shift_ended';
+           clockInRules.message = 'Czas zmiany minął';
+      } else {
+           clockInRules.canClockIn = true;
+           clockInRules.status = 'ok';
+           clockInRules.message = 'Możesz rozpocząć pracę';
+      }
+  }
+
+  // Calculate target based on user monthly goal (approx / 4 weeks)
+  const user = db.users.find(u => u.id === userId);
+  const monthlyGoalHours = user?.monthlyGoal || 160; 
+  const targetMinutes = Math.round((monthlyGoalHours / 4) * 60);
+
+  res.json({
+      nextShift,
+      clockInRules,
+      weekSummary: {
+          workedMinutes,
+          plannedMinutes,
+          targetMinutes
+      }
+  });
+});
+
 app.get('/shifts', (req, res) => {
   const db = readDb();
-  const { from, to, assignedUserId, role } = req.query;
+  let { from, to, assignedUserId, role, groupBy, summary } = req.query;
+  
+  if (groupBy) groupBy = groupBy.trim();
+  if (summary) summary = summary.trim();
+
+  // console.log('[DEBUG] GET /shifts params:', { from, to, assignedUserId, groupBy, summary });
+
   let list = db.shifts.map(s => ({ ...s, date: s.date }));
   
   // Filter by date range
@@ -223,14 +402,57 @@ app.get('/shifts', (req, res) => {
   
   // Filter by role (optional)
   if (role) list = list.filter(s => s.role === role);
+
+  // Grouping logic (Admin Panel)
+  let result = list;
+  if (groupBy === 'date') {
+    const grouped = {};
+    list.forEach(s => {
+      const d = s.date instanceof Date ? s.date.toISOString().split('T')[0] : s.date.split('T')[0];
+      if (!grouped[d]) grouped[d] = [];
+      grouped[d].push(s);
+    });
+    result = grouped;
+  }
+
+  // Summary logic (Schedule Screen)
+  if (summary === 'true') {
+     let totalMinutes = 0;
+     list.forEach(s => {
+        const { start, end } = getShiftIntervals(s);
+        const diff = differenceInMinutes(end, start);
+        totalMinutes += Math.max(0, diff);
+     });
+     
+     // Return structured response
+     return res.json({
+         data: result, // 'data' can be array or object (grouped)
+         totalMinutes
+     });
+  }
   
-  res.json(list);
+  // If only grouped, return the object directly (for backward compat if needed, or consistency)
+  // For AdminShiftsScreen which uses groupBy='date' but not summary
+  if (groupBy === 'date') {
+      return res.json(result);
+  }
+  
+  res.json(result);
 });
 
 // Shifts management (employer convenience endpoints)
 app.post('/shifts', (req, res) => {
   const { date, start, end, role, location, assignedUserId } = req.body || {};
   if (!date || !start || !end) return res.status(400).json({ error: 'date, start, end required' });
+
+  // Validation: End > Start
+  // Note: If we support overnight shifts in future, this logic needs adjustment (check date diff)
+  // Current assumption: Strings like "HH:MM" or ISO on SAME day.
+  // Assuming frontend sends full ISOs for createShift:
+  if (start >= end) {
+      return res.status(400).json({ error: 'Data zakończenia musi być późniejsza niż rozpoczęcia.' });
+  }
+
   const db = readDb();
   const id = String((db.shifts?.length || 0) + 1);
   const now = new Date().toISOString();
@@ -330,24 +552,45 @@ app.get('/timesheets/active/:userId', (req, res) => {
   const db = readDb();
   const { userId } = req.params;
   const active = (db.timesheets || []).find(t => t.userId === userId && !t.clockOut);
-  if (!active) return res.status(404).json({ error: 'not clocked in' });
+  // Return 200 with null instead of 404 to avoid frontend console errors
+  if (!active) return res.json(null);
   res.json(active);
 });
 
 // Availability endpoints
 app.get('/availabilities', (req, res) => {
   const db = readDb();
-  const { userId, from, to } = req.query;
+  const { userId, from, to, includeNames } = req.query;
   let list = db.availabilities || [];
   if (userId) list = list.filter(a => a.userId === userId);
   if (from) list = list.filter(a => new Date(a.date) >= new Date(from));
   if (to) list = list.filter(a => new Date(a.date) <= new Date(to));
+  
+  if (includeNames === 'true') {
+    list = list.map(a => {
+        const u = db.users.find(x => x.id === a.userId);
+        return { ...a, userName: u ? (u.name || u.username) : 'Unknown' };
+    });
+  }
+  
   res.json(list);
 });
 
 app.post('/availabilities', (req, res) => {
   const { userId, date, start, end, notes } = req.body || {};
   if (!userId || !date || !start || !end) return res.status(400).json({ error: 'userId, date, start, end required' });
+  
+  // Validation: End > Start
+  // start/end can be "HH:MM" (legacy) or full ISO strings
+  // Let's normalize comparison
+  let s = start, e = end;
+  if (start.includes('T') && end.includes('T')) {
+      if (new Date(start) >= new Date(end)) return res.status(400).json({ error: 'Data zakończenia musi być późniejsza niż rozpoczęcia.' });
+  } else {
+      // String comparison for HH:MM works if format is consistent (e.g. 08:00 vs 16:00)
+      if (s >= e) return res.status(400).json({ error: 'Godzina do musi być późniejsza niż od.' });
+  }
+
   const db = readDb();
   db.availabilities = db.availabilities || [];
   const id = String(db.availabilities.length + 1);
@@ -371,11 +614,45 @@ app.delete('/availabilities/:id', (req, res) => {
 // Swaps endpoints
 app.get('/swaps', (req, res) => {
   const db = readDb();
-  const { userId } = req.query;
+  let { userId, type, includeNames } = req.query;
+  if (type) type = type.trim();
+  
   let list = db.swaps || [];
-  if (userId) {
+
+  if (type === 'market') {
+    if (!userId) return res.status(400).json({ error: 'userId required' });
+    list = list.filter(s => 
+      s.status === 'pending' && 
+      s.requesterId !== userId &&
+      (!s.targetUserId || s.targetUserId === userId)
+    );
+  } else if (type === 'mine') {
+    if (!userId) return res.status(400).json({ error: 'userId required' });
+    list = list.filter(s => s.requesterId === userId);
+  } else if (userId) {
     list = list.filter(s => s.requesterId === userId || s.targetUserId === userId);
   }
+  
+  // Always include critical shift details to avoid N+1 fetches on frontend
+  list = list.map(s => {
+     const shift = (db.shifts || []).find(sh => sh.id === s.shiftId);
+     const reqUser = (db.users || []).find(u => u.id === s.requesterId);
+     const targetUser = s.targetUserId ? (db.users || []).find(u => u.id === s.targetUserId) : null;
+     
+     return {
+        ...s,
+        shift: shift ? {
+            date: shift.date,
+            start: shift.start,
+            end: shift.end,
+            role: shift.role,
+            location: shift.location
+        } : null,
+        requesterName: reqUser ? (reqUser.name || reqUser.username) : 'Unknown',
+        targetName: targetUser ? (targetUser.name || targetUser.username) : 'Ktokolwiek'
+     };
+  });
+  
   res.json(list);
 });
 
@@ -763,6 +1040,9 @@ function calculateNonOverlappingMinutes(intervals) {
   return totalMinutes;
 }
 
+// EARNINGS REPORT ENDPOINT
+// Returns pre-calculated financial data for EarningsCalculatorScreen.
+// Moves logic from frontend: hourly rate multiplication, projection math.
 app.get('/reports/earnings', (req, res) => {
   const { userId, date } = req.query; 
   if (!userId || !date) return res.status(400).json({ error: 'Missing userId or date' });
@@ -798,10 +1078,8 @@ app.get('/reports/earnings', (req, res) => {
 
   const plannedIntervals = [];
   userShifts.forEach(s => {
-      const dayStr = s.date.split('T')[0];
-      const startDt = new Date(`${dayStr}T${s.start}:00`);
-      let endDt = new Date(`${dayStr}T${s.end}:00`);
-      if (endDt < startDt) endDt = addMinutes(endDt, 24 * 60);
+      // FIX: Use robust helper that handles both ISO strings and HH:MM legacy format
+      const { start: startDt, end: endDt } = getShiftIntervals(s);
 
       // Only count if it's in the future relative to NOW
       if (startDt > now) {
@@ -812,6 +1090,9 @@ app.get('/reports/earnings', (req, res) => {
 
   const hourlyRate = user.hourlyRate || 0;
   const goalMinutes = (user.monthlyGoal || 160) * 60;
+  
+  const earnedValue = (workedMinutes / 60) * hourlyRate;
+  const projectedValue = (plannedMinutes / 60) * hourlyRate;
 
   res.json({
       monthName: targetDate.toLocaleDateString('pl-PL', { month: 'long', year: 'numeric' }),
@@ -819,7 +1100,9 @@ app.get('/reports/earnings', (req, res) => {
       plannedMinutes,
       totalMinutes: workedMinutes + plannedMinutes,
       hourlyRate,
-      targetMinutes: goalMinutes
+      targetMinutes: goalMinutes,
+      earnedValue,
+      projectedValue
   });
 });
 

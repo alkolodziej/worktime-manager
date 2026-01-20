@@ -47,14 +47,14 @@ export default function RootNavigation() {
       {loading ? (
         <Loading />
       ) : user ? (
-        <Stack.Navigator>
+        <Stack.Navigator screenOptions={{ headerBackTitle: 'Wróć' }}>
           {needsOnboarding ? (
              <Stack.Screen name="Onboarding" component={OnboardingScreen} options={{ headerShown: false }} />
           ) : (
             <>
               <Stack.Screen name="Tabs" component={AppTabs} options={{ headerShown: false }} />
               <Stack.Screen name="Availability" component={AvailabilityScreen} options={{ title: 'Dostępność' }} />
-              <Stack.Screen name="Swaps" component={SwapsScreen} options={{ title: 'Zamiana zmian' }} />
+              <Stack.Screen name="Swaps" component={SwapsScreen} options={{ title: 'Giełda zmian' }} />
               <Stack.Screen name="AdminShifts" component={AdminShiftsScreen} options={{ title: 'Zarządzaj zmianami' }} />
               <Stack.Screen name="AdminRequests" component={AdminRequestsScreen} options={{ title: 'Prośby i zgłoszenia' }} />
             </>

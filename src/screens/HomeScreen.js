@@ -9,8 +9,8 @@ import Badge from '../components/Badge';
 import Toast from '../components/Toast';
 import { LocationCheckModal } from '../components/LocationCheckModal';
 import { Ionicons } from '@expo/vector-icons';
-import { formatTimeRange, minutesToHhMm, parseTimeMinutes } from '../utils/format';
-import { apiGetShifts, apiClockIn, apiClockOut, apiGetTimesheets, apiGetActiveTimesheet } from '../utils/api';
+import { formatTimeRange, minutesToHhMm } from '../utils/format';
+import { apiGetDashboard, apiClockIn, apiClockOut, apiGetActiveTimesheet } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
@@ -19,13 +19,12 @@ import {
   isWithinRestaurant,
 } from '../utils/location';
 
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 
 export default function HomeScreen() {
   const { user } = useAuth();
   const navigation = useNavigation();
-  const [shifts, setShifts] = React.useState([]);
-  const [timesheets, setTimesheets] = React.useState([]);
+  const [dashboard, setDashboard] = React.useState(null);
   const [showShiftModal, setShowShiftModal] = React.useState(false);
   const [selectedShift, setSelectedShift] = React.useState(null);
 
@@ -39,150 +38,56 @@ export default function HomeScreen() {
   const [locationMessage, setLocationMessage] = React.useState('');
   const [locationDetails, setLocationDetails] = React.useState(null);
 
-  React.useEffect(() => {
-    if (!user?.id) return;
-    (async () => {
-      try {
-        // Backend filters by assignedUserId — no client-side filtering needed
-        const list = await apiGetShifts({ assignedUserId: user.id });
-        setShifts(list);
-      } catch (error) {
-        console.error('Failed to fetch shifts:', error);
-      }
-    })();
-  }, [user?.id]);
+  useFocusEffect(
+    React.useCallback(() => {
+      if (!user?.id) return;
 
-  React.useEffect(() => {
-    if (!user?.id) return;
-    (async () => {
-      try {
-        const list = await apiGetTimesheets({ userId: user.id });
-        setTimesheets(list);
-      } catch (error) {
-        console.error('Failed to fetch timesheets:', error);
-      }
-    })();
-  }, [user?.id]);
+      let isActive = true;
+      const sync = async () => {
+        try {
+          // 1. Fetch Dashboard (Stats & Next Shift)
+          const data = await apiGetDashboard(user.id);
+          if (isActive) setDashboard(data);
+
+          // 2. Sync Active Timer
+          let backendActive = null;
+          try {
+            const res = await apiGetActiveTimesheet(user.id);
+            if (res && res.clockIn) backendActive = res;
+          } catch (e) { /* ignore 404/null */ }
+
+          if (isActive) {
+             if (backendActive) {
+                const startTime = new Date(backendActive.clockIn);
+                setActiveStart(startTime);
+                await AsyncStorage.setItem(ACTIVE_SHIFT_KEY, String(startTime.getTime()));
+             } else {
+                setActiveStart(null);
+                await AsyncStorage.removeItem(ACTIVE_SHIFT_KEY);
+             }
+          }
+        } catch (error) {
+           console.error('Sync failed', error);
+           // Fallback for timer
+           const raw = await AsyncStorage.getItem(ACTIVE_SHIFT_KEY);
+           if (isActive && raw) setActiveStart(new Date(parseInt(raw, 10)));
+        }
+      };
+
+      sync();
+      return () => { isActive = false; };
+    }, [user?.id])
+  );
+
   const now = currentTime;
-  
-  // Logic to find Today's shift more robustly
-  const todaysShift = React.useMemo(() => {
-    const todayYMD = now.toISOString().split('T')[0];
-    return shifts.find(s => {
-      // Handle both formats if necessary, but assuming ISO from backend
-      if (!s.date) return false;
-      // Convert shift date to YYYY-MM-DD in LOCAL time (or just simple slice if backend is UTC-normalized to date)
-      // Safest: Create date object, get local ISO slice
-      const d = new Date(s.date);
-      // Determine if 'd' falls on the same calendar day as 'now'
-      return d.getDate() === now.getDate() && 
-             d.getMonth() === now.getMonth() && 
-             d.getFullYear() === now.getFullYear();
-    });
-  }, [shifts, now]);
-
-  const nextShift = React.useMemo(() => {
-    if (todaysShift) return todaysShift;
-    // Find first future shift
-    // Sort shifts first to be safe
-    const sorted = [...shifts].sort((a, b) => new Date(a.date) - new Date(b.date));
-    return sorted.find(s => {
-      if (!s.date) return false;
-      const sDate = new Date(s.date);
-      // Check if date is in future (tomorrow+)
-      // If it is today, it would be caught by todaysShift unless it's later today? 
-      // Actually todaysShift catches EVERYTHING for today.
-      // So here we look for date > today (roughly)
-      return sDate > now;
-    }) || shifts[0]; // Fallback
-  }, [shifts, todaysShift, now]);
-
-  // Calculate week summary from timesheets (Mon-Sun)
-  const weekSummary = React.useMemo(() => {
-    // Info: "Start of week" (Monday)
-    const current = new Date(now);
-    const day = current.getDay(); // 0=Sun, 1=Mon
-    const diff = current.getDate() - day + (day === 0 ? -6 : 1); // adjust when day is sunday
-    const monday = new Date(current.setDate(diff));
-    monday.setHours(0, 0, 0, 0);
-
-    const nextMonday = new Date(monday);
-    nextMonday.setDate(monday.getDate() + 7);
-
-    // Calculate worked minutes from timesheets
-    let workedMinutes = 0;
-    timesheets.forEach(timesheet => {
-      const clockIn = new Date(timesheet.clockIn);
-      // Valid if clockIn is within this week
-      if (clockIn >= monday && clockIn < nextMonday) {
-         if (timesheet.clockOut) {
-            const clockOut = new Date(timesheet.clockOut);
-            workedMinutes += (clockOut - clockIn) / (1000 * 60);
-         } else {
-            // Option: Count current active session up to now?
-            // workedMinutes += (now - clockIn) / (1000 * 60);
-         }
-      }
-    });
-
-    // Calculate planned minutes from shifts (This Week)
-    let plannedMinutes = 0;
-    shifts.forEach(shift => {
-      if (!shift?.date) return;
-      const shiftDate = new Date(shift.date);
-      if (shiftDate >= monday && shiftDate < nextMonday) {
-        const startMins = parseTimeMinutes(shift.start);
-        const endMins = parseTimeMinutes(shift.end);
-        let minutes = endMins - startMins;
-        if (minutes < 0) minutes += 24 * 60; 
-        plannedMinutes += minutes;
-      }
-    });
-    
-    // Default goal (e.g. 40h)
-    const targetMinutes = 40 * 60;
-
-    return {
-      workedMinutes: Math.floor(workedMinutes),
-      plannedMinutes,
-      targetMinutes,
-    };
-  }, [shifts, timesheets, now]);
+  const nextShift = dashboard?.nextShift;
+  const weekSummary = dashboard?.weekSummary || { workedMinutes: 0, plannedMinutes: 0, targetMinutes: 2400 };
+  const clockInRules = dashboard?.clockInRules;
 
   const ACTIVE_SHIFT_KEY = `WTM_ACTIVE_SHIFT_START_${user?.id}`;
 
-  React.useEffect(() => {
-    if (!user?.id) return;
-    (async () => {
-      try {
-        // Source of truth: Backend
-        // If we are online, check if we have an active timesheet
-        let backendActive = null;
-        try {
-          const res = await apiGetActiveTimesheet(user.id);
-          if (res && res.clockIn) backendActive = res;
-        } catch (e) {
-          // 404 means no active timesheet
-        }
-
-        if (backendActive) {
-          const startTime = new Date(backendActive.clockIn);
-          setActiveStart(startTime);
-          await AsyncStorage.setItem(ACTIVE_SHIFT_KEY, String(startTime.getTime()));
-        } else {
-          // Backend says not working. Trust it? 
-          // If we are offline, we might rely on Storage, but if we just got 404 from backend it means we are online.
-          // So we should probably clear local state to sync.
-          setActiveStart(null);
-          await AsyncStorage.removeItem(ACTIVE_SHIFT_KEY);
-        }
-      } catch (err) {
-        // Network error probably. Fallback to local storage.
-        const raw = await AsyncStorage.getItem(ACTIVE_SHIFT_KEY);
-        if (raw) setActiveStart(new Date(parseInt(raw, 10)));
-      }
-    })();
-  }, [user?.id]);
+  // Removed redundant useEffect for apiGetActiveTimesheet since it's now in useFocusEffect above
+  // React.useEffect(() => { ... }) has been removed here.
 
   React.useEffect(() => {
     // Update current time every second to refresh timer
@@ -195,6 +100,12 @@ export default function HomeScreen() {
   const isClockedIn = !!activeStart;
 
   const handleClockIn = async () => {
+    // 1. Validation logic moved to backend
+    if (clockInRules && !clockInRules.canClockIn) {
+        Alert.alert('Info', clockInRules.message);
+        return;
+    }
+
     setIsCheckingLocation(true);
     setLocationStatus('loading');
     setLocationMessage('Weryfikacja uprawnień GPS...');
@@ -259,6 +170,8 @@ export default function HomeScreen() {
       // Auto-close success modal after short delay
       setTimeout(() => {
         setIsCheckingLocation(false);
+        // Refresh dashboard to update UI instantly without waiting for focus
+        apiGetDashboard(user.id).then(d => setDashboard(d)).catch(() => {});
       }, 1800);
 
     } catch (error) {
@@ -272,12 +185,17 @@ export default function HomeScreen() {
     setActiveStart(null);
     await AsyncStorage.removeItem(ACTIVE_SHIFT_KEY);
     if (user?.id) {
-      try { await apiClockOut({ userId: user.id, timestamp: now }); } catch {}
+      try { 
+          await apiClockOut({ userId: user.id, timestamp: now });
+          // Refresh dashboard stats immediately
+          apiGetDashboard(user.id).then(d => setDashboard(d)).catch(() => {});
+      } catch {}
     }
   };
 
-  const startDate = nextShift ? parseShiftTime(nextShift.date, nextShift.start) : null;
-  const endDate = nextShift ? parseShiftTime(nextShift.date, nextShift.end) : null;
+  const startDate = nextShift?.startTime ? new Date(nextShift.startTime) : null;
+  const endDate = nextShift?.endTime ? new Date(nextShift.endTime) : null;
+
   // Used globally: const now = currentTime; 
   const beforeStart = startDate ? now < startDate : false;
   const duringShift = startDate && endDate ? now >= startDate && now <= endDate : false;
@@ -306,7 +224,7 @@ export default function HomeScreen() {
       )}
       <Text style={styles.greeting}>Cześć, {user?.name?.split(' ')[0] || 'Użytkowniku'}</Text>
 
-      <SectionHeader title={todaysShift ? 'Dzisiejsza zmiana' : 'Najbliższa zmiana'} />
+      <SectionHeader title={nextShift?.isToday ? 'Dzisiejsza zmiana' : 'Najbliższa zmiana'} />
       <Card style={{ marginBottom: spacing.lg }}>
         {!nextShift ? (
           <Text style={styles.countdown}>Brak zaplanowanych zmian</Text>
@@ -321,7 +239,7 @@ export default function HomeScreen() {
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <View>
               <Text style={styles.shiftText}>{formatTimeRange(nextShift.start, nextShift.end)}</Text>
-              {!todaysShift && (
+              {!nextShift.isToday && (
                  <Text style={{ fontSize: 13, color: colors.primary, fontWeight: '500', marginBottom: 2 }}>
                     {new Date(nextShift.date).toLocaleDateString('pl-PL', { weekday: 'short', day: 'numeric', month: 'short' })}
                  </Text>
@@ -329,7 +247,7 @@ export default function HomeScreen() {
               <Text style={styles.metaText}>{nextShift.location} • {nextShift.role}</Text>
             </View>
             <View>
-              <Badge label={todaysShift ? 'Dziś' : 'Nadchodząca'} tone={todaysShift ? 'success' : 'info'} />
+              <Badge label={nextShift.isToday ? 'Dziś' : 'Nadchodząca'} tone={nextShift.isToday ? 'success' : 'info'} />
               <Ionicons name="chevron-forward" size={20} color={colors.muted} style={{ marginTop: spacing.sm }} />
             </View>
           </View>
@@ -347,9 +265,9 @@ export default function HomeScreen() {
 
         <View style={styles.actions}>
           <TouchableOpacity
-            style={[styles.button, styles.inButton, (isClockedIn || isCheckingLocation ? styles.disabledBtn : null)]}
+            style={[styles.button, styles.inButton, (isClockedIn || isCheckingLocation || (clockInRules && !clockInRules.canClockIn) ? styles.disabledBtn : null)]}
             onPress={handleClockIn}
-            disabled={isClockedIn || isCheckingLocation}
+            disabled={isClockedIn || isCheckingLocation || (clockInRules && !clockInRules.canClockIn)}
             accessibilityLabel="Rozpocznij rejestrację czasu pracy"
             accessibilityHint="Wymaga weryfikacji lokalizacji GPS"
           >
@@ -361,7 +279,7 @@ export default function HomeScreen() {
             ) : (
               <>
                 <Ionicons name="log-in-outline" size={18} color="#fff" style={{ marginRight: 6 }} />
-                <Text style={styles.buttonText}>{isClockedIn ? 'W trakcie' : 'Wejdź do pracy'}</Text>
+                <Text style={styles.buttonText}>{isClockedIn ? 'W trakcie' : (clockInRules?.canClockIn ? 'Wejdź do pracy' : 'Brak zmiany')}</Text>
               </>
             )}
           </TouchableOpacity>
@@ -400,11 +318,6 @@ export default function HomeScreen() {
           icon="swap-horizontal-outline" 
           label="Giełda Zmian" 
           onPress={() => navigation.navigate('Swaps')}
-        />
-        <QuickAction 
-          icon="airplane-outline" 
-          label="Zgłoś urlop" 
-          onPress={() => Alert.alert('Urlop', 'Funkcja w przygotowaniu')}
         />
       </View>
 
@@ -481,38 +394,7 @@ function QuickAction({ icon, label, onPress, disabled }) {
   );
 }
 
-function parseShiftTime(dateObj, timeStr) {
-  let h = 0, m = 0;
-  
-  if (typeof timeStr === 'string' && timeStr.includes('T')) {
-      // It's an ISO string, e.g. "2026-01-16T13:00:00.000Z"
-      const dTime = new Date(timeStr);
-      h = dTime.getHours();
-      m = dTime.getMinutes();
-  } else if (typeof timeStr === 'string' && timeStr.includes(':')) {
-      // It's "HH:MM"
-      const parts = timeStr.split(':').map(x => parseInt(x, 10));
-      h = parts[0];
-      m = parts[1];
-  } else {
-      // Fallback
-      return new Date(dateObj); // Shouldn't happen if data is clean
-  }
 
-  const sDate = new Date(dateObj); // This is usually UTC 00:00 or similar
-  
-  // Create local date
-  const d = new Date(
-    sDate.getFullYear(),
-    sDate.getMonth(),
-    sDate.getDate(),
-    h,
-    m,
-    0,
-    0
-  );
-  return d;
-}
 
 function formatCountdown(target, now) {
   const diff = Math.max(0, target.getTime() - now.getTime());
