@@ -122,6 +122,24 @@
         "reminderMinutes": 30
       },
       "monthlyGoal": 160
+    },
+    {
+      "id": "1768964336372",
+      "username": "ola.kot",
+      "password": "12345",
+      "name": "ola.kot",
+      "isEmployer": false,
+      "phone": "",
+      "avatar": null,
+      "hourlyRate": 30.5,
+      "positions": [
+        "4"
+      ],
+      "preferences": {
+        "notificationsEnabled": true,
+        "remindersEnabled": true,
+        "reminderMinutes": 30
+      }
     }
   ],
   "shifts": [
@@ -205,17 +223,6 @@
       "positionId": "1"
     },
     {
-      "id": "10",
-      "date": "2026-01-21T00:00:00.000Z",
-      "start": "2026-01-21T07:00:00.000Z",
-      "end": "2026-01-21T15:00:00.000Z",
-      "role": "Pomoc kuchenna",
-      "location": "Lokal główny",
-      "assignedUserId": "1",
-      "createdAt": "2026-01-19T22:28:39.583Z",
-      "updatedAt": "2026-01-19T22:28:39.583Z"
-    },
-    {
       "id": "11",
       "date": "2026-01-22T00:00:00.000Z",
       "start": "2026-01-22T14:00:00.000Z",
@@ -228,18 +235,6 @@
       "positionId": "1"
     },
     {
-      "id": "12",
-      "date": "2026-01-22T00:00:00.000Z",
-      "start": "2026-01-22T07:00:00.000Z",
-      "end": "2026-01-22T21:00:00.000Z",
-      "role": "Kierownik zmiany",
-      "location": "Lokal główny",
-      "assignedUserId": "1",
-      "createdAt": "2026-01-19T22:29:34.288Z",
-      "updatedAt": "2026-01-19T22:31:03.461Z",
-      "positionId": "5"
-    },
-    {
       "id": "13",
       "date": "2026-01-22T00:00:00.000Z",
       "start": "2026-01-22T07:00:00.000Z",
@@ -249,6 +244,17 @@
       "assignedUserId": "2",
       "createdAt": "2026-01-19T22:29:41.312Z",
       "updatedAt": "2026-01-19T22:29:41.312Z"
+    },
+    {
+      "id": "1768963680744-911",
+      "date": "2026-01-21T00:00:00.000Z",
+      "start": "2026-01-21T07:00:00.000Z",
+      "end": "2026-01-21T15:00:00.000Z",
+      "role": "Kelner",
+      "location": "Lokal główny",
+      "assignedUserId": "1768964336372",
+      "createdAt": "2026-01-21T02:48:00.744Z",
+      "updatedAt": "2026-01-21T02:48:00.744Z"
     }
   ],
   "availabilities": [
@@ -291,6 +297,86 @@
       "notes": "",
       "createdAt": "2026-01-19T09:48:03.321Z",
       "updatedAt": "2026-01-19T09:48:03.321Z"
+    },
+    {
+      "id": "5",
+      "userId": "1",
+      "date": "2026-01-30T00:00:00.000Z",
+      "start": "09:00",
+      "end": "16:00",
+      "notes": "",
+      "createdAt": "2026-01-21T02:34:31.654Z",
+      "updatedAt": "2026-01-21T02:39:15.539Z"
+    },
+    {
+      "id": "6",
+      "userId": "1",
+      "date": "2026-01-22T00:00:00.000Z",
+      "start": "08:00",
+      "end": "16:00",
+      "notes": "",
+      "createdAt": "2026-01-21T02:35:59.654Z",
+      "updatedAt": "2026-01-21T02:35:59.654Z"
+    },
+    {
+      "id": "7",
+      "userId": "1768556809459",
+      "date": "2026-01-30T00:00:00.000Z",
+      "start": "08:00",
+      "end": "16:00",
+      "notes": "",
+      "createdAt": "2026-01-21T02:38:05.621Z",
+      "updatedAt": "2026-01-21T02:38:05.621Z"
+    },
+    {
+      "id": "8",
+      "userId": "1",
+      "date": "2026-01-31T00:00:00.000Z",
+      "start": "08:00",
+      "end": "20:00",
+      "notes": "",
+      "createdAt": "2026-01-21T02:41:25.733Z",
+      "updatedAt": "2026-01-21T02:41:25.733Z"
+    },
+    {
+      "id": "9",
+      "userId": "1768964336372",
+      "date": "2026-01-28T00:00:00.000Z",
+      "start": "08:00",
+      "end": "16:00",
+      "notes": "",
+      "createdAt": "2026-01-21T02:59:11.967Z",
+      "updatedAt": "2026-01-21T02:59:11.967Z"
+    },
+    {
+      "id": "10",
+      "userId": "1768964336372",
+      "date": "2026-01-29T00:00:00.000Z",
+      "start": "08:00",
+      "end": "16:00",
+      "notes": "",
+      "createdAt": "2026-01-21T02:59:13.527Z",
+      "updatedAt": "2026-01-21T02:59:13.527Z"
+    },
+    {
+      "id": "11",
+      "userId": "1768964336372",
+      "date": "2026-01-30T00:00:00.000Z",
+      "start": "08:00",
+      "end": "16:00",
+      "notes": "",
+      "createdAt": "2026-01-21T02:59:15.298Z",
+      "updatedAt": "2026-01-21T02:59:15.298Z"
+    },
+    {
+      "id": "12",
+      "userId": "1768964336372",
+      "date": "2026-01-31T00:00:00.000Z",
+      "start": "08:00",
+      "end": "16:00",
+      "notes": "",
+      "createdAt": "2026-01-21T02:59:16.809Z",
+      "updatedAt": "2026-01-21T02:59:16.809Z"
     }
   ],
   "swaps": [
@@ -320,6 +406,24 @@
       "status": "accepted",
       "createdAt": "2026-01-19T09:45:50.795Z",
       "updatedAt": "2026-01-19T09:47:07.847Z"
+    },
+    {
+      "id": "4",
+      "shiftId": "1768963555774-963",
+      "requesterId": "1",
+      "targetUserId": "1768964336372",
+      "status": "accepted",
+      "createdAt": "2026-01-21T03:16:11.915Z",
+      "updatedAt": "2026-01-21T03:16:46.488Z"
+    },
+    {
+      "id": "5",
+      "shiftId": "1768963680744-911",
+      "requesterId": "1",
+      "targetUserId": "1768964336372",
+      "status": "accepted",
+      "createdAt": "2026-01-21T03:17:50.330Z",
+      "updatedAt": "2026-01-21T03:18:26.474Z"
     }
   ],
   "timesheets": [
@@ -448,6 +552,54 @@
       "userId": "1",
       "shiftId": "7",
       "clockIn": "2026-01-20T07:53:25.423Z",
+      "clockOut": "2026-01-21T01:26:02.161Z",
+      "checkInLocation": {
+        "latitude": 50.8788,
+        "longitude": 20.6402,
+        "accuracy": 5
+      }
+    },
+    {
+      "id": "12",
+      "userId": "1",
+      "shiftId": "10",
+      "clockIn": "2026-01-21T01:39:24.454Z",
+      "clockOut": "2026-01-21T02:25:53.131Z",
+      "checkInLocation": {
+        "latitude": 50.8788,
+        "longitude": 20.6402,
+        "accuracy": 5
+      }
+    },
+    {
+      "id": "13",
+      "userId": "1",
+      "shiftId": "10",
+      "clockIn": "2026-01-21T02:25:56.976Z",
+      "clockOut": "2026-01-21T02:26:16.628Z",
+      "checkInLocation": {
+        "latitude": 50.8788,
+        "longitude": 20.6402,
+        "accuracy": 5
+      }
+    },
+    {
+      "id": "14",
+      "userId": "1",
+      "shiftId": "10",
+      "clockIn": "2026-01-21T02:26:39.854Z",
+      "clockOut": "2026-01-21T02:29:41.179Z",
+      "checkInLocation": {
+        "latitude": 50.8788,
+        "longitude": 20.6402,
+        "accuracy": 5
+      }
+    },
+    {
+      "id": "15",
+      "userId": "1",
+      "shiftId": "10",
+      "clockIn": "2026-01-21T02:29:43.044Z",
       "clockOut": null,
       "checkInLocation": {
         "latitude": 50.8788,

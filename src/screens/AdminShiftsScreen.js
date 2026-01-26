@@ -36,6 +36,7 @@ export default function AdminShiftsScreen() {
   const [showPositionPicker, setShowPositionPicker] = useState(false);
   
   // Edit/Create Form State
+  const [isEditing, setIsEditing] = useState(false);
   const [editingShift, setEditingShift] = useState(null);
   const [formUserId, setFormUserId] = useState('');
   const [formStart, setFormStart] = useState(new Date());
@@ -108,6 +109,7 @@ export default function AdminShiftsScreen() {
 
   // Modal Handlers
   const openModal = async (shift = null) => {
+    setIsEditing(!!shift);
     // Fetch availability for the selected date
     try {
        const aUsers = await apiGetAvailableUsers(selectedDate);
@@ -170,7 +172,11 @@ export default function AdminShiftsScreen() {
         location: 'Lokal główny' // Default location
       };
 
-      if (editingShift) {
+      if (isEditing) {
+        if (!editingShift || !editingShift.id) {
+           showToast('Błąd: brak ID zmiany', 'error');
+           return;
+        }
         await apiUpdateShift(editingShift.id, payload);
         showToast('Zmiana zaktualizowana', 'success');
       } else {

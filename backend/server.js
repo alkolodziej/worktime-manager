@@ -180,7 +180,13 @@ app.get('/users/filter', (req, res) => {
   const db = readDb();
   const { date, positionIds, includeUnavailable } = req.query;
   console.log('Filtering users with params:', { date, positionIds, includeUnavailable });
-  let usersList = (db.users || []).filter(u => !u.isEmployer);
+  
+  // Do not filter out employers if they want to assign themselves shifts?
+  // The user request says "Employer user despite adding availability does not see it".
+  // This line: let usersList = (db.users || []).filter(u => !u.isEmployer);
+  // explicitly removes employers. We should allow them if they are capable of working.
+  
+  let usersList = (db.users || []); // Removed .filter(u => !u.isEmployer)
   
   // Filter by positions (OR logic: user must have at least ONE of the specified positions)
   if (positionIds && positionIds !== 'all') {
@@ -204,9 +210,10 @@ app.get('/users/filter', (req, res) => {
   }
   
   // Filter out unavailable users unless includeUnavailable is true
-  if (!includeUnavailable || includeUnavailable === 'false') {
-    usersList = usersList.filter(user => !!availabilityMap[user.id]);
-  }
+  // USER REQUEST: Always show unavailable users, do not filter them out.
+  // if (!includeUnavailable || includeUnavailable === 'false') {
+  //   usersList = usersList.filter(user => !!availabilityMap[user.id]);
+  // }
   
   // Sort: available users first, then unavailable
   usersList.sort((a, b) => {
@@ -454,7 +461,8 @@ app.post('/shifts', (req, res) => {
   }
 
   const db = readDb();
-  const id = String((db.shifts?.length || 0) + 1);
+  // Generate a unique ID using timestamp + random suffix to prevent collisions
+  const id = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
   const now = new Date().toISOString();
   const item = {
     id,
@@ -1103,6 +1111,52 @@ app.get('/reports/earnings', (req, res) => {
       targetMinutes: goalMinutes,
       earnedValue,
       projectedValue
+  });
+});
+
+/* LOCATION CHECK HELPER */
+function deg2rad(deg) {
+  return deg * (Math.PI / 180);
+}
+
+function getDistanceFromLatLonInM(lat1, lon1, lat2, lon2) {
+  var R = 6371; // Radius of the earth in km
+  var dLat = deg2rad(lat2 - lat1);
+  var dLon = deg2rad(lon2 - lon1);
+  var a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  var d = R * c; // Distance in km
+  return d * 1000;
+}
+
+// POST /company/check-location
+app.post('/company/check-location', (req, res) => {
+  const { latitude, longitude } = req.body;
+
+  // Basic validation
+  if (latitude === undefined || longitude === undefined) {
+    return res.status(400).json({ error: 'Missing coordinates' });
+  }
+
+  const db = readDb();
+  const company = db.company;
+
+  // Default fallback if no location configured
+  if (!company || !company.location || !company.location.latitude) {
+    return res.json({ isWithin: true, distance: 0, radius: 0, warning: 'No company location configured' });
+  }
+
+  const target = company.location;
+  const dist = getDistanceFromLatLonInM(latitude, longitude, target.latitude, target.longitude);
+  const radius = target.radius || 100; // Default 100 meters
+
+  res.json({
+    isWithin: dist <= radius,
+    distance: Math.round(dist),
+    radius: radius
   });
 });
 

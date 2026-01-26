@@ -7,7 +7,8 @@ A comprehensive restaurant staff scheduling app with shift management, clock in/
 ### For Employees
 - 📅 View assigned shifts with details
 - ⏱️ Clock in/out with persistent timer
-- 🔄 Request and manage shift swaps
+- � Location validation (GPS) for clock actions
+- �🔄 Request and manage shift swaps
 - 👤 Update personal profile
 - 📊 View weekly work summary
 
@@ -19,7 +20,13 @@ A comprehensive restaurant staff scheduling app with shift management, clock in/
 
 ## 🚀 Quick Start
 
-### Backend
+### Opcja deweloperska (wszystko w jednym)
+```bash
+npm install && cd backend && npm install && cd ..
+npm run dev
+```
+
+### Backend (manualnie)
 ```bash
 cd backend
 npm install
@@ -27,7 +34,7 @@ npm start
 # Expected: ✓ Backend running on http://0.0.0.0:8000
 ```
 
-### Frontend
+### Frontend (manualnie)
 ```bash
 npm install
 EXPO_PUBLIC_BACKEND_HOST=localhost EXPO_PUBLIC_BACKEND_PORT=8000 npm start
@@ -35,15 +42,8 @@ EXPO_PUBLIC_BACKEND_HOST=localhost EXPO_PUBLIC_BACKEND_PORT=8000 npm start
 ```
 
 ### Test Accounts
-- Admin: `admin@worktime.local`
-- Employee: `john@worktime.local`, `jane@worktime.local`
-
-## 📚 Documentation
-
-- **[QUICK_START.md](./QUICK_START.md)** - User guide with all features
-- **[TESTING_GUIDE.md](./TESTING_GUIDE.md)** - Complete testing procedures
-- **[DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md)** - Setup, known issues, security
-- **[SPRINT_SUMMARY.md](./SPRINT_SUMMARY.md)** - What was implemented
+- Pracodawca (Admin): `pracodawca` (hasło nie jest wymagane)
+- Pracownik: `pracownik` (hasło nie jest wymagane)
 
 ## 🛠️ Tech Stack
 
@@ -73,10 +73,6 @@ EXPO_PUBLIC_BACKEND_HOST=localhost EXPO_PUBLIC_BACKEND_PORT=8000 npm start
 │   ├── .env              # Backend config
 │   └── package.json
 ├── .env                  # Frontend config
-├── QUICK_START.md        # User guide
-├── TESTING_GUIDE.md      # Testing procedures
-├── DEPLOYMENT_GUIDE.md   # Known issues, security
-└── SPRINT_SUMMARY.md     # Implementation summary
 ```
 
 ## 🎯 Implementation Status
@@ -94,12 +90,12 @@ EXPO_PUBLIC_BACKEND_HOST=localhost EXPO_PUBLIC_BACKEND_PORT=8000 npm start
 | 7. Shift CRUD | ✅ | Full create/read/update/delete |
 | 8. Swap Features | ✅ | Request, prevent duplicates, cancel |
 | 9. Shift Details | ✅ | Modal on HomeScreen |
-| 10. Testing & Docs | ✅ | Comprehensive guides included |
+| 10. Testing & Docs | ⚠️ | README zaktualizowane, brak dodatkowych dokumentów |
 
 ## 🔐 Security Notes
 
 ### Current (MVP)
-- ✅ Email-only login
+- ✅ Username-only login
 - ✅ Infinite session (no expiry)
 - ✅ Backend data filtering
 - ✅ Swap authorization
@@ -111,13 +107,9 @@ EXPO_PUBLIC_BACKEND_HOST=localhost EXPO_PUBLIC_BACKEND_PORT=8000 npm start
 - ❌ HTTPS/TLS
 - ❌ Audit logging
 
-See [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) for full checklist.
-
 ## 📞 Support
 
-1. Check **[QUICK_START.md](./QUICK_START.md)** for usage
-2. Check **[TESTING_GUIDE.md](./TESTING_GUIDE.md)** for testing
-3. Check **[DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md)** for troubleshooting
+Contact the development team for any issues.
 
 ---
 

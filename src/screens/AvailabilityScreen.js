@@ -137,6 +137,7 @@ export default function AvailabilityScreen() {
           return; // Exit here, handled in Alert callback
         } else {
            showToast('Brak dostępności do usunięcia', 'info');
+           setSaving(false);
         }
       } else {
         // Validation
